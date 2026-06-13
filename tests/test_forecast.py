@@ -1,7 +1,10 @@
 """Tests for forecast module."""
+import numpy as np
+import pandas as pd
 import pytest
 
 from ozon_agent.forecast.base import BaseForecaster, ForecastResult
+from ozon_agent.forecast.prophet_forecaster import ProphetForecaster
 
 
 def test_forecast_result_dataclass():
@@ -31,3 +34,35 @@ def test_base_forecaster_requires_fit_predict():
 
     with pytest.raises(TypeError):
         IncompleteForecaster()
+
+
+def test_prophet_forecaster_fit_predict():
+    """Test Prophet forecaster produces valid forecasts."""
+    dates = pd.date_range("2026-01-01", periods=60, freq="D")
+    df = pd.DataFrame({
+        "date": dates,
+        "quantity": np.random.poisson(20, 60),
+    })
+
+    fitter = ProphetForecaster()
+    fitter.fit(df, target="quantity")
+    result = fitter.predict(periods=7)
+
+    assert len(result.dates) == 7
+    assert len(result.point) == 7
+    assert result.model == "prophet"
+    assert all(p >= 0 for p in result.point)
+
+
+def test_prophet_forecaster_short_data():
+    """Test Prophet handles short data gracefully."""
+    df = pd.DataFrame({
+        "date": pd.date_range("2026-01-01", periods=5, freq="D"),
+        "quantity": [10, 12, 14, 13, 15],
+    })
+
+    fitter = ProphetForecaster()
+    fitter.fit(df, target="quantity")
+    result = fitter.predict(periods=3)
+
+    assert len(result.dates) == 3
