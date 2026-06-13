@@ -6,6 +6,7 @@ import pytest
 from ozon_agent.forecast.base import BaseForecaster, ForecastResult
 from ozon_agent.forecast.lgbm_forecaster import LGBMForecaster
 from ozon_agent.forecast.prophet_forecaster import ProphetForecaster
+from ozon_agent.forecast.roi_calculator import ROICalculator
 from ozon_agent.forecast.stock_predictor import StockPredictor
 from ozon_agent.forecast.xgb_forecaster import XGBForecaster
 
@@ -145,3 +146,39 @@ def test_stock_predictor_healthy_stock():
     result = predictor.predict(days=14)
 
     assert result["risk_level"] == "low"
+
+
+def test_roi_calculator_forecasts_roi():
+    """Test ROI calculator produces valid forecasts."""
+    df = pd.DataFrame({
+        "date": pd.date_range("2026-01-01", periods=30, freq="D"),
+        "revenue": np.random.uniform(5000, 15000, 30),
+        "spend": np.random.uniform(500, 2000, 30),
+        "quantity": np.random.poisson(20, 30),
+    })
+
+    calculator = ROICalculator()
+    calculator.fit(df)
+    result = calculator.forecast_roi(days=7)
+
+    assert "daily_roi" in result
+    assert "total_roi" in result
+    assert "forecasted_profit" in result
+    assert len(result["daily_roi"]) == 7
+
+
+def test_roi_calculator_forecasts_profit():
+    """Test profit forecast with cost data."""
+    df = pd.DataFrame({
+        "date": pd.date_range("2026-01-01", periods=30, freq="D"),
+        "revenue": [10000] * 30,
+        "spend": [1000] * 30,
+        "quantity": [20] * 30,
+    })
+
+    calculator = ROICalculator(cost_per_unit=100)
+    calculator.fit(df)
+    result = calculator.forecast_profit(days=7, ad_budget=1500)
+
+    assert "daily_profit" in result
+    assert "total_profit" in result
