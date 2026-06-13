@@ -5,6 +5,7 @@ import pytest
 
 from ozon_agent.forecast.base import BaseForecaster, ForecastResult
 from ozon_agent.forecast.prophet_forecaster import ProphetForecaster
+from ozon_agent.forecast.xgb_forecaster import XGBForecaster
 
 
 def test_forecast_result_dataclass():
@@ -66,3 +67,27 @@ def test_prophet_forecaster_short_data():
     result = fitter.predict(periods=3)
 
     assert len(result.dates) == 3
+
+
+def test_xgb_forecaster_fit_predict():
+    """Test XGBoost forecaster with exogenous features."""
+    n = 60
+    dates = pd.date_range("2026-01-01", periods=n, freq="D")
+    df = pd.DataFrame({
+        "date": dates,
+        "quantity": np.random.poisson(20, n),
+        "price": np.random.uniform(100, 500, n),
+        "spend": np.random.uniform(50, 500, n),
+    })
+
+    fitter = XGBForecaster()
+    fitter.fit(df, target="quantity", features=["price", "spend"])
+    result = fitter.predict(periods=7, future_df=pd.DataFrame({
+        "date": pd.date_range("2026-03-01", periods=7, freq="D"),
+        "price": [200] * 7,
+        "spend": [100] * 7,
+    }))
+
+    assert len(result.dates) == 7
+    assert len(result.point) == 7
+    assert result.model == "xgboost"
