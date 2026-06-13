@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from ozon_agent.forecast.base import BaseForecaster, ForecastResult
+from ozon_agent.forecast.lgbm_forecaster import LGBMForecaster
 from ozon_agent.forecast.prophet_forecaster import ProphetForecaster
 from ozon_agent.forecast.xgb_forecaster import XGBForecaster
 
@@ -91,3 +92,23 @@ def test_xgb_forecaster_fit_predict():
     assert len(result.dates) == 7
     assert len(result.point) == 7
     assert result.model == "xgboost"
+
+
+def test_lgbm_forecaster_fit_predict():
+    """Test LightGBM forecaster."""
+    n = 60
+    df = pd.DataFrame({
+        "date": pd.date_range("2026-01-01", periods=n, freq="D"),
+        "quantity": np.random.poisson(20, n),
+        "price": np.random.uniform(100, 500, n),
+    })
+
+    fitter = LGBMForecaster()
+    fitter.fit(df, target="quantity", features=["price"])
+    result = fitter.predict(periods=5, future_df=pd.DataFrame({
+        "date": pd.date_range("2026-03-01", periods=5, freq="D"),
+        "price": [250] * 5,
+    }))
+
+    assert len(result.dates) == 5
+    assert result.model == "lightgbm"
