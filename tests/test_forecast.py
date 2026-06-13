@@ -6,6 +6,7 @@ import pytest
 from ozon_agent.forecast.base import BaseForecaster, ForecastResult
 from ozon_agent.forecast.lgbm_forecaster import LGBMForecaster
 from ozon_agent.forecast.prophet_forecaster import ProphetForecaster
+from ozon_agent.forecast.stock_predictor import StockPredictor
 from ozon_agent.forecast.xgb_forecaster import XGBForecaster
 
 
@@ -112,3 +113,35 @@ def test_lgbm_forecaster_fit_predict():
 
     assert len(result.dates) == 5
     assert result.model == "lightgbm"
+
+
+def test_stock_predictor_predicts_stockout():
+    """Test stock predictor identifies stockout risk."""
+    df = pd.DataFrame({
+        "date": pd.date_range("2026-01-01", periods=30, freq="D"),
+        "stock_total": list(range(100, 70, -1)),
+        "quantity": [1] * 30,
+    })
+
+    predictor = StockPredictor()
+    predictor.fit(df)
+    result = predictor.predict(days=14)
+
+    assert result["days_until_stockout"] <= 30
+    assert result["risk_level"] in ["high", "medium", "low"]
+    assert "recommended_restock" in result
+
+
+def test_stock_predictor_healthy_stock():
+    """Test stock predictor with healthy stock levels."""
+    df = pd.DataFrame({
+        "date": pd.date_range("2026-01-01", periods=30, freq="D"),
+        "stock_total": [500] * 30,
+        "quantity": [5] * 30,
+    })
+
+    predictor = StockPredictor()
+    predictor.fit(df)
+    result = predictor.predict(days=14)
+
+    assert result["risk_level"] == "low"
