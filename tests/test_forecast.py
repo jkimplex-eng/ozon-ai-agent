@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from ozon_agent.forecast.base import BaseForecaster, ForecastResult
+from ozon_agent.forecast.evaluate import compare_models, evaluate_forecast
 from ozon_agent.forecast.lgbm_forecaster import LGBMForecaster
 from ozon_agent.forecast.prophet_forecaster import ProphetForecaster
 from ozon_agent.forecast.roi_calculator import ROICalculator
@@ -182,3 +183,32 @@ def test_roi_calculator_forecasts_profit():
 
     assert "daily_profit" in result
     assert "total_profit" in result
+
+
+def test_evaluate_forecast():
+    """Test forecast evaluation metrics."""
+    actual = [100, 110, 120, 115, 130]
+    predicted = [105, 108, 118, 120, 125]
+
+    metrics = evaluate_forecast(actual, predicted)
+
+    assert "mae" in metrics
+    assert "rmse" in metrics
+    assert "mape" in metrics
+    assert metrics["mae"] > 0
+    assert metrics["rmse"] > 0
+
+
+def test_compare_models():
+    """Test model comparison."""
+    forecasts = {
+        "prophet": [100, 110, 120],
+        "xgboost": [105, 108, 118],
+    }
+    actual = [102, 112, 119]
+
+    comparison = compare_models(forecasts, actual)
+
+    assert "prophet" in comparison
+    assert "xgboost" in comparison
+    assert "best_model" in comparison
