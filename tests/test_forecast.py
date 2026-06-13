@@ -212,3 +212,15 @@ def test_compare_models():
     assert "prophet" in comparison
     assert "xgboost" in comparison
     assert "best_model" in comparison
+
+
+def test_forecast_cli_help():
+    """Test forecast CLI command exists."""
+    from click.testing import CliRunner
+
+    from ozon_agent.cli import main
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["forecast", "--help"])
+    assert result.exit_code == 0
+    assert "Forecast" in result.output or "forecast" in result.output
