@@ -1,8 +1,9 @@
 """Prophet-based time-series forecaster."""
 import logging
+from typing import Any
 
 import pandas as pd
-from prophet import Prophet
+from prophet import Prophet  # type: ignore[import-untyped]
 
 from .base import BaseForecaster, ForecastResult
 
@@ -10,12 +11,15 @@ logger = logging.getLogger(__name__)
 
 
 class ProphetForecaster(BaseForecaster):
-    def __init__(self, **prophet_kwargs):
-        self._model = None
+    def __init__(self, **prophet_kwargs: Any) -> None:
+        self._model: Prophet | None = None
         self._target = ""
         self._kwargs = prophet_kwargs
 
-    def fit(self, df: pd.DataFrame, target: str, date_col: str = "date") -> None:
+    def fit(
+        self, df: pd.DataFrame, target: str,
+        features: list[str] | None = None, date_col: str = "date",
+    ) -> None:
         self._target = target
         prophet_df = df[[date_col, target]].copy()
         prophet_df.columns = ["ds", "y"]

@@ -7,9 +7,9 @@ from .prophet_forecaster import ProphetForecaster
 
 
 class StockPredictor:
-    def __init__(self):
+    def __init__(self) -> None:
         self._sales_fitter = ProphetForecaster()
-        self._current_stock = 0
+        self._current_stock: float = 0
         self._fitted = False
 
     def fit(

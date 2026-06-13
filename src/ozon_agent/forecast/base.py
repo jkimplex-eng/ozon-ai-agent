@@ -16,7 +16,10 @@ class ForecastResult:
 
 class BaseForecaster(ABC):
     @abstractmethod
-    def fit(self, df: pd.DataFrame, target: str, date_col: str = "date") -> None:
+    def fit(
+        self, df: pd.DataFrame, target: str,
+        features: list[str] | None = None, date_col: str = "date",
+    ) -> None:
         ...
 
     @abstractmethod

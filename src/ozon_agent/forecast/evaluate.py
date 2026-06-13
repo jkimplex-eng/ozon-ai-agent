@@ -24,7 +24,7 @@ def evaluate_forecast(actual: list[float], predicted: list[float]) -> dict[str, 
 def compare_models(
     forecasts: dict[str, list[float]], actual: list[float]
 ) -> dict[str, Any]:
-    results = {}
+    results: dict[str, Any] = {}
     for name, pred in forecasts.items():
         results[name] = evaluate_forecast(actual, pred)
 

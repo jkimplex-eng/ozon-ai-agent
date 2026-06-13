@@ -1,5 +1,6 @@
 """XGBoost multi-variate forecaster."""
 import logging
+from typing import Any
 
 import pandas as pd
 import xgboost as xgb
@@ -10,8 +11,8 @@ logger = logging.getLogger(__name__)
 
 
 class XGBForecaster(BaseForecaster):
-    def __init__(self, **xgb_kwargs):
-        self._model = None
+    def __init__(self, **xgb_kwargs: Any) -> None:
+        self._model: xgb.XGBRegressor | None = None
         self._target = ""
         self._features: list[str] = []
         self._kwargs = xgb_kwargs

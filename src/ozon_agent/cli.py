@@ -186,6 +186,7 @@ def forecast(target: str, periods: int, model: str) -> None:
     import pandas as pd
 
     from .db.connection import execute_query
+    from .forecast.base import BaseForecaster
     from .forecast.lgbm_forecaster import LGBMForecaster
     from .forecast.prophet_forecaster import ProphetForecaster
     from .forecast.xgb_forecaster import XGBForecaster
@@ -202,6 +203,7 @@ def forecast(target: str, periods: int, model: str) -> None:
 
     console.print(f"  Loaded {len(sales)} days of data")
 
+    fitter: BaseForecaster
     if model == "prophet":
         fitter = ProphetForecaster()
         fitter.fit(sales, target=target)

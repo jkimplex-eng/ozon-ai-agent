@@ -1,5 +1,6 @@
 """LightGBM multi-variate forecaster."""
 import logging
+from typing import Any
 
 import lightgbm as lgb
 import pandas as pd
@@ -10,8 +11,8 @@ logger = logging.getLogger(__name__)
 
 
 class LGBMForecaster(BaseForecaster):
-    def __init__(self, **lgbm_kwargs):
-        self._model = None
+    def __init__(self, **lgbm_kwargs: Any) -> None:
+        self._model: lgb.LGBMRegressor | None = None
         self._target = ""
         self._features: list[str] = []
         self._kwargs = lgbm_kwargs
