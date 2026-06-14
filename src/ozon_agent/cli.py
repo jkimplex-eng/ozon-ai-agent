@@ -223,5 +223,149 @@ def forecast(target: str, periods: int, model: str) -> None:
         console.print(f"  {date}: {val:.1f}")
 
 
+@main.command()
+@click.option(
+    "--builder", "-b",
+    default="manual",
+    type=click.Choice(["mimo", "codex", "cursor", "claude", "manual"]),
+    help="Builder type that produced the changes",
+)
+@click.option("--task-goal", "-g", required=True, help="Goal of the task being audited")
+@click.option("--output", "-o", default=None, help="Output file path (JSON)")
+def supervise(builder: str, task_goal: str, output: str | None) -> None:
+    """Run supervisor audit on current project state."""
+    import json
+
+    from .supervisor.collectors import (
+        detect_architecture_risks,
+        get_changed_files,
+        get_git_status,
+        get_roadmap_alignment,
+        get_test_results,
+        recommend_next_task,
+    )
+    from .supervisor.report import AuditReport, format_report_text
+
+    console.print(f"[bold blue]Running supervisor audit (builder={builder})...[/]")
+
+    git_status = get_git_status()
+    changed_files = get_changed_files()
+    test_results = get_test_results()
+    roadmap = get_roadmap_alignment()
+    risks = detect_architecture_risks()
+    next_task = recommend_next_task(roadmap["completed"])
+
+    report = AuditReport(
+        builder_type=builder,
+        task_goal=task_goal,
+        timestamp=datetime.now().isoformat(),
+        git_status=git_status,
+        changed_files=changed_files,
+        test_results=test_results,
+        roadmap_alignment=roadmap,
+        architecture_risks=risks,
+        recommended_next_task=next_task,
+        summary=f"Builder {builder} completed task: {task_goal}",
+    )
+
+    if output:
+        with open(output, "w", encoding="utf-8") as f:
+            json.dump(report.to_dict(), f, ensure_ascii=False, indent=2)
+        console.print(f"[green]Report saved to {output}[/]")
+    else:
+        console.print(format_report_text(report))
+
+
+@main.command()
+@click.option("--target", "-t", default="vps", help="Deployment target (SSH host)")
+@click.option("--branch", "-b", default="main", help="Git branch to deploy")
+@click.option("--execute", is_flag=True, default=False, help="Execute deployment")
+@click.option("--output", "-o", default=None, help="Output file path (JSON)")
+def deploy(target: str, branch: str, execute: bool, output: str | None) -> None:
+    """Deploy to VPS after supervisor checks."""
+    import json
+
+    from .deploy.deploy_plan import (
+        build_deploy_plan,
+        evaluate_deploy_readiness,
+        format_plan_text,
+    )
+    from .deploy.health_check import run_full_health_check
+    from .deploy.vps_deployer import execute_deploy
+
+    console.print("[bold blue]Checking deployment readiness...[/]")
+
+    from .supervisor.collectors import get_test_results
+
+    test_results = get_test_results()
+
+    decision = evaluate_deploy_readiness(supervisor_status="pass", test_results=test_results)
+
+    if not decision.deploy_allowed:
+        console.print(f"[red]Cannot deploy: {decision.reason}[/]")
+        return
+
+    if decision.risk_level == "medium":
+        console.print(f"[bold yellow]WARNING: {decision.reason}[/]")
+
+    plan = build_deploy_plan(decision, target=target, branch=branch, dry_run=not execute)
+
+    if output:
+        with open(output, "w", encoding="utf-8") as f:
+            json.dump(plan.to_dict(), f, ensure_ascii=False, indent=2)
+        console.print(f"[green]Plan saved to {output}[/]")
+        return
+
+    console.print(format_plan_text(plan, decision))
+
+    if not execute:
+        console.print("\n[bold yellow]DRY RUN — no commands executed.[/]")
+        console.print("Use [bold]--execute[/] to deploy for real.")
+        return
+
+    console.print("\n[bold green]EXECUTING DEPLOYMENT...[/]")
+    deploy_result = execute_deploy(target, branch)
+
+    if deploy_result["success"]:
+        console.print("[bold green]Deployment successful![/]")
+        console.print("\nRunning health check...")
+        health = run_full_health_check(target)
+        if health["healthy"]:
+            console.print("[bold green]Health check passed![/]")
+        else:
+            console.print("[bold red]Health check FAILED![/]")
+            for name, check in health["checks"].items():
+                if not check["healthy"]:
+                    console.print(f"  {name}: {check.get('error', 'failed')}")
+            console.print("\n[bold yellow]Rollback command:[/]")
+            console.print(f"  ozon-agent rollback --target {target}")
+    else:
+        console.print("[bold red]Deployment FAILED![/]")
+        for step in deploy_result["steps"]:
+            if not step["success"]:
+                console.print(f"  Failed: {step['step']} — {step['stderr']}")
+        console.print("\n[bold yellow]Rollback command:[/]")
+        console.print(f"  ozon-agent rollback --target {target}")
+
+
+@main.command()
+@click.option("--target", "-t", default="vps", help="Deployment target (SSH host)")
+def rollback(target: str) -> None:
+    """Rollback to previous commit on VPS."""
+    from .deploy.rollback import execute_rollback, format_rollback_text
+
+    console.print(f"[bold yellow]Rolling back on {target}...[/]")
+    console.print(format_rollback_text(target))
+
+    result = execute_rollback(target)
+    if result["success"]:
+        console.print("[bold green]Rollback successful![/]")
+    else:
+        console.print("[bold red]Rollback failed![/]")
+        for step in result["steps"]:
+            if not step["success"]:
+                console.print(f"  Failed: {step['step']} — {step['stderr']}")
+
+
 if __name__ == "__main__":
     main()
