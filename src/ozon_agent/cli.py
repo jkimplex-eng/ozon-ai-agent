@@ -607,5 +607,63 @@ def approvals_outcomes(rec_id: str) -> None:
         console.print()
 
 
+@main.command()
+@click.option(
+    "--dry-run", is_flag=True, default=False,
+    help="Show pending migrations without applying",
+)
+def migrate(dry_run: bool) -> None:
+    """Apply pending database migrations."""
+    from .db.migrator import migrate as run_migrate
+    from .db.migrator import migration_status
+
+    status = migration_status()
+    console.print(
+        f"[bold blue]Migrations: {status['applied']} applied, "
+        f"{status['pending']} pending[/]"
+    )
+
+    if status["pending"] == 0:
+        console.print("[green]All migrations applied.[/]")
+        return
+
+    console.print("[bold blue]Pending:[/]")
+    for f in status["pending_files"]:
+        console.print(f"  - {f}")
+
+    if dry_run:
+        console.print("\n[bold yellow]DRY RUN — no migrations applied.[/]")
+        return
+
+    results = run_migrate()
+    for r in results:
+        if r.applied:
+            console.print(f"[green]Applied: {r.filename}[/]")
+        else:
+            console.print(f"[red]Failed: {r.filename} — {r.error}[/]")
+            return
+
+    console.print("[bold green]All pending migrations applied.[/]")
+
+
+@main.command("migrate-status")
+def migrate_status_cmd() -> None:
+    """Show migration status."""
+    from .db.migrator import migration_status
+
+    status = migration_status()
+    table = Table(title="Migration Status")
+    table.add_column("Metric")
+    table.add_column("Value")
+    table.add_row("Total", str(status["total"]))
+    table.add_row("Applied", str(status["applied"]))
+    table.add_row("Pending", str(status["pending"]))
+    if status["applied_versions"]:
+        table.add_row("Applied versions", ", ".join(status["applied_versions"]))
+    if status["pending_files"]:
+        table.add_row("Pending files", ", ".join(status["pending_files"]))
+    console.print(table)
+
+
 if __name__ == "__main__":
     main()
