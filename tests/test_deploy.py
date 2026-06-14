@@ -2,8 +2,11 @@
 from ozon_agent.deploy.deploy_plan import (
     DeployDecision,
     build_deploy_plan,
+    detect_pending_migrations,
     evaluate_deploy_readiness,
     format_plan_text,
+    scan_approval_telegram_forbidden,
+    scan_decision_modules_forbidden,
 )
 from ozon_agent.deploy.rollback import format_rollback_text, generate_rollback_commands
 
@@ -187,3 +190,65 @@ def test_evaluate_deploy_readiness_all_warnings():
     assert "skipped" in decision.reason
     assert "lint" in decision.reason
     assert "type" in decision.reason
+
+
+def test_scan_decision_modules_forbidden():
+    """Test forbidden keyword scan returns list."""
+    found = scan_decision_modules_forbidden()
+    assert isinstance(found, list)
+
+
+def test_scan_decision_modules_clean():
+    """Test decision modules have no forbidden keywords."""
+    found = scan_decision_modules_forbidden()
+    assert found == []
+
+
+def test_evaluate_deploy_readiness_blocks_forbidden():
+    """Test deploy blocked when decision modules contain forbidden keywords."""
+    from unittest.mock import patch
+
+    with patch(
+        "ozon_agent.deploy.deploy_plan.scan_decision_modules_forbidden",
+        return_value=["requests.post", "httpx.post"],
+    ):
+        decision = evaluate_deploy_readiness("pass", {"failed": 0, "total": 10})
+        assert decision.deploy_allowed is False
+        assert decision.risk_level == "blocked"
+        assert "forbidden" in decision.reason.lower()
+
+
+def test_scan_approval_telegram_forbidden():
+    """Test approval/telegram forbidden keyword scan returns list."""
+    found = scan_approval_telegram_forbidden()
+    assert isinstance(found, list)
+
+
+def test_scan_approval_telegram_clean():
+    """Test approval/telegram modules have no forbidden keywords."""
+    found = scan_approval_telegram_forbidden()
+    assert found == []
+
+
+def test_detect_pending_migrations():
+    """Test migration detection returns list."""
+    migrations = detect_pending_migrations()
+    assert isinstance(migrations, list)
+
+
+def test_detect_pending_migrations_finds_approval():
+    """Test migration detection finds approval migration."""
+    migrations = detect_pending_migrations()
+    has_approval = any("approval" in m.lower() or "recommendation" in m.lower() for m in migrations)
+    assert has_approval
+
+
+def test_format_plan_text_shows_migration():
+    """Test deploy plan text shows migration info."""
+    decision = DeployDecision(
+        deploy_allowed=True, reason="OK", required_steps=[],
+        risk_level="low", supervisor_status="pass",
+    )
+    plan = build_deploy_plan(decision, target="vps", branch="main", dry_run=True)
+    text = format_plan_text(plan, decision)
+    assert "Migration" in text or "migration" in text

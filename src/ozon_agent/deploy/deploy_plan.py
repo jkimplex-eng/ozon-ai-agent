@@ -1,9 +1,23 @@
 """Deployment decision and plan generation."""
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+FORBIDDEN_KEYWORDS = [
+    "update_price",
+    "change_price",
+    "create_campaign",
+    "update_bid",
+    "pause_campaign_api",
+    "create_supply",
+    "external_post",
+    "execute_ozon_action",
+    "requests.post",
+    "httpx.post",
+]
 
 
 @dataclass
@@ -56,6 +70,18 @@ def evaluate_deploy_readiness(
             deploy_allowed=False,
             reason="Supervisor status is FAIL — fix issues before deploying",
             required_steps=[],
+            risk_level="blocked",
+            supervisor_status=supervisor_status,
+            test_results=test_results,
+        )
+
+    forbidden = scan_decision_modules_forbidden()
+    forbidden.extend(scan_approval_telegram_forbidden())
+    if forbidden:
+        return DeployDecision(
+            deploy_allowed=False,
+            reason=f"Forbidden keywords found: {', '.join(sorted(set(forbidden)))}",
+            required_steps=["Remove forbidden write-action keywords from modules"],
             risk_level="blocked",
             supervisor_status=supervisor_status,
             test_results=test_results,
@@ -185,5 +211,71 @@ def format_plan_text(plan: DeployPlan, decision: DeployDecision) -> str:
     else:
         lines.append("[EXECUTE] Commands will be executed on target.")
 
+    migration = detect_pending_migrations()
+    if migration:
+        lines.append("")
+        lines.append("Migration detected:")
+        for m in migration:
+            lines.append(f"  {m}")
+        lines.append("")
+        lines.append("Manual/automatic migration step required before restart.")
+
     lines.append("=" * 60)
     return "\n".join(lines)
+
+
+def scan_decision_modules_forbidden() -> list[str]:
+    found: list[str] = []
+    decision_dir = os.path.join(
+        os.path.dirname(__file__), "..", "decision"
+    )
+    if not os.path.isdir(decision_dir):
+        return found
+
+    for filename in os.listdir(decision_dir):
+        if not filename.endswith(".py"):
+            continue
+        filepath = os.path.join(decision_dir, filename)
+        try:
+            with open(filepath, encoding="utf-8") as f:
+                content = f.read()
+        except Exception:
+            continue
+
+        for keyword in FORBIDDEN_KEYWORDS:
+            if keyword in content:
+                found.append(keyword)
+
+    return sorted(set(found))
+
+
+def scan_approval_telegram_forbidden() -> list[str]:
+    found: list[str] = []
+    for module_name in ("approval", "telegram"):
+        module_dir = os.path.join(os.path.dirname(__file__), "..", module_name)
+        if not os.path.isdir(module_dir):
+            continue
+        for filename in os.listdir(module_dir):
+            if not filename.endswith(".py"):
+                continue
+            filepath = os.path.join(module_dir, filename)
+            try:
+                with open(filepath, encoding="utf-8") as f:
+                    content = f.read()
+            except Exception:
+                continue
+            for keyword in FORBIDDEN_KEYWORDS:
+                if keyword in content:
+                    found.append(keyword)
+    return sorted(set(found))
+
+
+def detect_pending_migrations() -> list[str]:
+    migrations_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "migrations")
+    if not os.path.isdir(migrations_dir):
+        return []
+    return [
+        f"migrations/{f}"
+        for f in sorted(os.listdir(migrations_dir))
+        if f.endswith(".sql")
+    ]

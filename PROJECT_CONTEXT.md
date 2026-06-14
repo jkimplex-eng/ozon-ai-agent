@@ -1,0 +1,59 @@
+# PROJECT_CONTEXT.md
+
+## Ozon AI Agent
+
+Autonomous analytics and decision engine for Ozon marketplace sellers.
+
+## Purpose
+
+Automate data collection, analysis, forecasting, and deployment for Ozon seller operations. The agent syncs data from Ozon API, runs diagnostics, forecasts demand, and generates actionable recommendations.
+
+## Architecture
+
+```
+Builder (AI/Manual) → Supervisor → Deployer → VPS
+```
+
+### Modules
+
+| Module | Purpose |
+|--------|---------|
+| `api/` | Ozon API client (httpx) |
+| `db/` | PostgreSQL connection pool (psycopg) |
+| `etl/` | Data sync from Ozon API to DB |
+| `analytics/` | Diagnostics, factor analysis, metrics |
+| `forecast/` | Prophet, XGBoost, LightGBM forecasters |
+| `decision/` | Recommendation engine, opportunity detection, confidence/risk scoring |
+| `approval/` | Approval workflow, outcome tracking, state machine |
+| `telegram/` | Telegram bot for recommendation approvals |
+| `supervisor/` | Audit reports, deployment decisions, safety checks |
+| `deploy/` | VPS deployment, health checks, rollback |
+| `models/` | Data models (Pydantic) |
+
+## Tech Stack
+
+- Python 3.11+
+- PostgreSQL (psycopg3)
+- Click CLI + Rich output
+- pandas, polars, xgboost, lightgbm, prophet
+- mypy strict, ruff lint
+- hatchling build
+
+## Roadmap
+
+| Phase | Name | Status |
+|-------|------|--------|
+| 1 | Data Warehouse | Done |
+| 2 | Analytics & Diagnostics | Done |
+| 3 | Forecasting | Done |
+| 4 | Decision Engine | Done |
+| 4.5 | Approval Workflow | Done |
+| 5 | Autonomous Experiments | Pending |
+
+## Safety Model
+
+- Decision Engine: recommendations only, no execution, no external API calls
+- Approval Workflow: approval/rejection only, no Ozon state mutations
+- Telegram: approve/reject only, no price/ad/stock API mutation
+- Supervisor: scans for forbidden keywords in all modules
+- Deployer: blocks deployment if forbidden keywords found or tests fail

@@ -80,12 +80,13 @@ def get_test_results() -> dict[str, Any]:
     return results
 
 
-ROADMAP = {
+ROADMAP: dict[str, Any] = {
     "phases": [
         {"id": 1, "name": "Data Warehouse", "status": "done"},
         {"id": 2, "name": "Analytics & Diagnostics", "status": "done"},
         {"id": 3, "name": "Forecasting", "status": "done"},
-        {"id": 4, "name": "Decision Engine", "status": "pending"},
+        {"id": 4, "name": "Decision Engine", "status": "done"},
+        {"id": 4.5, "name": "Approval Workflow", "status": "done"},
         {"id": 5, "name": "Autonomous Experiments", "status": "pending"},
     ],
     "next_after_forecasting": "Decision Engine",
@@ -133,19 +134,125 @@ def detect_architecture_risks() -> list[str]:
     except Exception:
         pass
 
+    risks.extend(check_decision_engine_safety())
+    risks.extend(check_approval_safety())
+    risks.extend(check_migration_exists())
+
+    return risks
+
+
+FORBIDDEN_KEYWORDS = [
+    "update_price",
+    "change_price",
+    "create_campaign",
+    "update_bid",
+    "pause_campaign_api",
+    "create_supply",
+    "external_post",
+    "requests.post",
+    "httpx.post",
+]
+
+
+def check_decision_engine_safety() -> list[str]:
+    import os
+
+    risks: list[str] = []
+    decision_dir = os.path.join(
+        os.path.dirname(__file__), "..", "decision"
+    )
+    if not os.path.isdir(decision_dir):
+        return risks
+
+    for filename in os.listdir(decision_dir):
+        if not filename.endswith(".py"):
+            continue
+        filepath = os.path.join(decision_dir, filename)
+        try:
+            with open(filepath, encoding="utf-8") as f:
+                content = f.read()
+        except Exception:
+            continue
+
+        for keyword in FORBIDDEN_KEYWORDS:
+            if keyword in content:
+                risks.append(
+                    f"Decision engine contains forbidden keyword '{keyword}' "
+                    f"in {filename}"
+                )
+
     return risks
 
 
 def recommend_next_task(completed_phases: list[str]) -> str:
+    if "Approval Workflow" in completed_phases:
+        return (
+            "Phase 5: Autonomous Experiments — "
+            "Build A/B testing framework and automated experiment tracking."
+        )
+    if "Decision Engine" in completed_phases:
+        return (
+            "Phase 4.5: Approval Workflow — "
+            "Complete outcome tracking and notification system. "
+            "Current: approval workflow implemented, safety checks active."
+        )
     if "Forecasting" in completed_phases:
         return (
             "Phase 4: Decision Engine — "
-            "Build recommendation engine that generates actionable decisions "
-            "(increase/decrease budget, pause campaigns, restock) "
-            "with confidence scores and approval workflow."
+            "Complete approval workflow and notification system. "
+            "Current: recommendations core implemented, safety checks active."
         )
     if "Analytics & Diagnostics" in completed_phases:
         return "Phase 3: Forecasting — Build prediction models."
     if "Data Warehouse" in completed_phases:
         return "Phase 2: Analytics & Diagnostics — Add factor analysis."
     return "Phase 1: Data Warehouse — Set up PostgreSQL schema and ETL."
+
+
+FORBIDDEN_KEYWORDS_EXTENDED = FORBIDDEN_KEYWORDS + [
+    "execute_ozon_action",
+]
+
+
+def check_approval_safety() -> list[str]:
+    import os
+
+    risks: list[str] = []
+    for module_name in ("approval", "telegram"):
+        module_dir = os.path.join(os.path.dirname(__file__), "..", module_name)
+        if not os.path.isdir(module_dir):
+            continue
+        for filename in os.listdir(module_dir):
+            if not filename.endswith(".py"):
+                continue
+            filepath = os.path.join(module_dir, filename)
+            try:
+                with open(filepath, encoding="utf-8") as f:
+                    content = f.read()
+            except Exception:
+                continue
+            for keyword in FORBIDDEN_KEYWORDS_EXTENDED:
+                if keyword in content:
+                    risks.append(
+                        f"{module_name} module contains forbidden keyword "
+                        f"'{keyword}' in {filename}"
+                    )
+    return risks
+
+
+def check_migration_exists() -> list[str]:
+    import os
+
+    risks: list[str] = []
+    migrations_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "migrations")
+    if not os.path.isdir(migrations_dir):
+        risks.append("migrations/ directory not found")
+        return risks
+    has_approval_migration = False
+    for filename in os.listdir(migrations_dir):
+        if "approval" in filename.lower() or "recommendation" in filename.lower():
+            has_approval_migration = True
+            break
+    if not has_approval_migration:
+        risks.append("No approval/recommendation migration found in migrations/")
+    return risks

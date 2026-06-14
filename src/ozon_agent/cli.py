@@ -367,5 +367,245 @@ def rollback(target: str) -> None:
                 console.print(f"  Failed: {step['step']} — {step['stderr']}")
 
 
+@main.command()
+@click.option("--sku", default=None, help="Filter by SKU")
+@click.option("--top", default=20, help="Max recommendations to show")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output JSON")
+@click.option("--output", "-o", default=None, help="Output file path")
+@click.option("--save-pending", is_flag=True, default=False, help="Save as PENDING approvals")
+@click.option("--force", is_flag=True, default=False, help="Force save even if duplicate exists")
+def recommendations(
+    sku: str | None, top: int, as_json: bool, output: str | None,
+    save_pending: bool, force: bool,
+) -> None:
+    """Generate recommendations from current data."""
+    import json
+
+    import pandas as pd
+
+    from .db.connection import execute_query
+
+    console.print("[bold blue]Loading data...[/]")
+
+    products = pd.DataFrame(execute_query("SELECT * FROM products"))
+    sales = pd.DataFrame(execute_query("SELECT * FROM sales"))
+    advertising = pd.DataFrame(execute_query("SELECT * FROM advertising"))
+
+    forecasts = pd.DataFrame(columns=["sku"])
+    stock = pd.DataFrame(columns=["sku"])
+
+    try:
+        rows = execute_query("SELECT * FROM forecasts")
+        if rows:
+            forecasts = pd.DataFrame(rows)
+    except Exception:
+        pass
+
+    try:
+        rows = execute_query("SELECT * FROM stock")
+        if rows:
+            stock = pd.DataFrame(rows)
+    except Exception:
+        pass
+
+    from .decision.feature_store import build_decision_features
+    from .decision.recommendation_engine import generate_recommendations
+    from .decision.recommendation_summary import recommendation_to_dict
+
+    features = build_decision_features(products, sales, advertising, forecasts, stock)
+
+    if sku:
+        features = [f for f in features if f.sku == sku]
+
+    if not features:
+        console.print("[yellow]No features found for recommendations.[/]")
+        return
+
+    recs = generate_recommendations(features, limit=top)
+
+    if not recs:
+        console.print("[yellow]No recommendations generated.[/]")
+        return
+
+    if save_pending:
+        from .approval.models import RecommendationStatus
+        from .approval.repository import list_recommendations
+        from .approval.workflow import create_pending_recommendation
+
+        saved_ids = []
+        for rec in recs:
+            if not force:
+                existing = list_recommendations(
+                    status=RecommendationStatus.PENDING, sku=rec.sku, limit=1
+                )
+                if existing and existing[0].action.value == rec.action.value:
+                    continue
+            stored = create_pending_recommendation(rec)
+            saved_ids.append(stored.id)
+
+        if saved_ids:
+            console.print(f"[green]Saved {len(saved_ids)} pending recommendation(s):[/]")
+            for rid in saved_ids:
+                console.print(f"  {rid}")
+        else:
+            console.print("[yellow]No new recommendations to save (duplicates found).[/]")
+        return
+
+    if as_json or output:
+        data = [recommendation_to_dict(r) for r in recs]
+        text = json.dumps(data, ensure_ascii=False, indent=2)
+        if output:
+            with open(output, "w", encoding="utf-8") as f:
+                f.write(text)
+            console.print(f"[green]Saved {len(recs)} recommendations to {output}[/]")
+        else:
+            console.print(text)
+    else:
+        table = Table(title=f"Recommendations ({len(recs)} total)")
+        table.add_column("SKU", max_width=20)
+        table.add_column("Action")
+        table.add_column("Confidence")
+        table.add_column("Risk")
+        table.add_column("Expected Effect", max_width=40)
+
+        for rec in recs:
+            conf_color = (
+                "green" if rec.confidence.level.value == "HIGH"
+                else "yellow" if rec.confidence.level.value == "MEDIUM"
+                else "red"
+            )
+            risk_color = (
+                "green" if rec.risk.level.value == "LOW"
+                else "yellow" if rec.risk.level.value == "MEDIUM"
+                else "red"
+            )
+            table.add_row(
+                rec.sku,
+                rec.action.value,
+                f"[{conf_color}]{rec.confidence.level.value} ({rec.confidence.score:.2f})[/]",
+                f"[{risk_color}]{rec.risk.level.value} ({rec.risk.score:.2f})[/]",
+                rec.expected_effect,
+            )
+
+        console.print(table)
+
+
+@main.group()
+def approvals() -> None:
+    """Manage recommendation approvals."""
+
+
+@approvals.command("list")
+@click.option("--status", "-s", default=None, help="Filter by status")
+@click.option("--limit", default=20, help="Max results")
+def approvals_list(status: str | None, limit: int) -> None:
+    """List recommendations."""
+    from .approval.approval_summary import format_recommendation_list
+    from .approval.models import RecommendationStatus
+    from .approval.repository import list_recommendations
+
+    status_enum = RecommendationStatus(status) if status else None
+    recs = list_recommendations(status=status_enum, limit=limit)
+    console.print(format_recommendation_list(recs))
+
+
+@approvals.command("show")
+@click.argument("rec_id")
+def approvals_show(rec_id: str) -> None:
+    """Show recommendation details."""
+    from .approval.approval_summary import format_recommendation_detail
+    from .approval.repository import get_recommendation
+
+    rec = get_recommendation(rec_id)
+    if rec is None:
+        console.print(f"[red]Recommendation {rec_id} not found.[/]")
+        return
+    console.print(format_recommendation_detail(rec))
+
+
+@approvals.command("approve")
+@click.argument("rec_id")
+@click.option("--by", required=True, help="Approver name")
+def approvals_approve(rec_id: str, by: str) -> None:
+    """Approve a recommendation."""
+    from .approval.workflow import approve_recommendation
+
+    try:
+        rec = approve_recommendation(rec_id, approved_by=by)
+        console.print(f"[green]Approved {rec.id} by {by}[/]")
+    except Exception as e:
+        console.print(f"[red]Failed: {e}[/]")
+
+
+@approvals.command("reject")
+@click.argument("rec_id")
+@click.option("--by", required=True, help="Rejector name")
+@click.option("--reason", required=True, help="Rejection reason")
+def approvals_reject(rec_id: str, by: str, reason: str) -> None:
+    """Reject a recommendation."""
+    from .approval.workflow import reject_recommendation
+
+    try:
+        rec = reject_recommendation(rec_id, rejected_by=by, reason=reason)
+        console.print(f"[yellow]Rejected {rec.id} by {by}: {reason}[/]")
+    except Exception as e:
+        console.print(f"[red]Failed: {e}[/]")
+
+
+@approvals.command("mark-executed")
+@click.argument("rec_id")
+def approvals_mark_executed(rec_id: str) -> None:
+    """Mark recommendation as executed."""
+    from .approval.workflow import mark_executed
+
+    try:
+        rec = mark_executed(rec_id)
+        console.print(f"[green]Marked {rec.id} as EXECUTED[/]")
+    except Exception as e:
+        console.print(f"[red]Failed: {e}[/]")
+
+
+@approvals.command("mark-observed")
+@click.argument("rec_id")
+def approvals_mark_observed(rec_id: str) -> None:
+    """Mark recommendation as observed."""
+    from .approval.workflow import mark_observed
+
+    try:
+        rec = mark_observed(rec_id)
+        console.print(f"[green]Marked {rec.id} as OBSERVED[/]")
+    except Exception as e:
+        console.print(f"[red]Failed: {e}[/]")
+
+
+@approvals.command("close")
+@click.argument("rec_id")
+def approvals_close(rec_id: str) -> None:
+    """Close a recommendation."""
+    from .approval.workflow import close_recommendation
+
+    try:
+        rec = close_recommendation(rec_id)
+        console.print(f"[green]Closed {rec.id}[/]")
+    except Exception as e:
+        console.print(f"[red]Failed: {e}[/]")
+
+
+@approvals.command("outcomes")
+@click.argument("rec_id")
+def approvals_outcomes(rec_id: str) -> None:
+    """Show outcomes for a recommendation."""
+    from .approval.approval_summary import format_outcome_detail
+    from .approval.repository import list_outcomes
+
+    outcomes = list_outcomes(rec_id)
+    if not outcomes:
+        console.print(f"[yellow]No outcomes for {rec_id}[/]")
+        return
+    for outcome in outcomes:
+        console.print(format_outcome_detail(outcome))
+        console.print()
+
+
 if __name__ == "__main__":
     main()

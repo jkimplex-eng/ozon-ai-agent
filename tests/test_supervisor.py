@@ -1,5 +1,8 @@
 """Tests for supervisor module."""
 from ozon_agent.supervisor.collectors import (
+    check_approval_safety,
+    check_decision_engine_safety,
+    check_migration_exists,
     detect_architecture_risks,
     get_changed_files,
     get_git_status,
@@ -146,3 +149,58 @@ def test_recommend_next_task():
 
     task3 = recommend_next_task(["Data Warehouse"])
     assert "Analytics" in task3
+
+
+def test_check_decision_engine_safety():
+    """Test decision engine safety check returns list."""
+    risks = check_decision_engine_safety()
+    assert isinstance(risks, list)
+
+
+def test_check_decision_engine_safety_no_forbidden():
+    """Test decision engine has no forbidden keywords."""
+    risks = check_decision_engine_safety()
+    assert risks == []
+
+
+def test_recommend_next_task_phase4_in_progress():
+    """Test next task when Phase 4 is in progress."""
+    task = recommend_next_task(
+        ["Data Warehouse", "Analytics & Diagnostics", "Forecasting"]
+    )
+    assert "Decision Engine" in task
+    assert "approval workflow" in task.lower()
+
+
+def test_check_approval_safety():
+    """Test approval safety check returns list."""
+    risks = check_approval_safety()
+    assert isinstance(risks, list)
+
+
+def test_check_approval_safety_no_forbidden():
+    """Test approval module has no forbidden keywords."""
+    risks = check_approval_safety()
+    assert risks == []
+
+
+def test_check_migration_exists():
+    """Test migration check returns list."""
+    risks = check_migration_exists()
+    assert isinstance(risks, list)
+
+
+def test_check_migration_found():
+    """Test migration is found."""
+    risks = check_migration_exists()
+    has_approval = any("approval" in r.lower() or "recommendation" in r.lower() for r in risks)
+    assert not has_approval
+
+
+def test_recommend_next_task_approval_workflow():
+    """Test next task after approval workflow."""
+    task = recommend_next_task(
+        ["Data Warehouse", "Analytics & Diagnostics", "Forecasting",
+         "Decision Engine"]
+    )
+    assert "Approval Workflow" in task or "approval" in task.lower()
