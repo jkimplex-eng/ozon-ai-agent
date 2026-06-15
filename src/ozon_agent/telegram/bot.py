@@ -7,6 +7,7 @@ Safety:
 """
 from __future__ import annotations
 
+import importlib
 from typing import Any
 
 from ozon_agent.approval.models import RecommendationStatus, StoredRecommendation
@@ -128,17 +129,17 @@ def _resolve_short_id(short_id: str) -> str | None:
 
 def create_app(token: str) -> Any:
     try:
-        from telegram import Update
-        from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+        telegram_ext = importlib.import_module("telegram.ext")
     except ImportError:
         raise ImportError(
             "python-telegram-bot is required. Install with: "
             "pip install python-telegram-bot"
         )
+    application_builder = getattr(telegram_ext, "ApplicationBuilder")
+    command_handler = getattr(telegram_ext, "CommandHandler")
 
-    async def recommendations_handler(
-        update: Update, context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
+    async def recommendations_handler(update: Any, context: Any) -> None:
+        del context
         if update.message is None:
             return
         text = update.message.text or ""
@@ -147,6 +148,6 @@ def create_app(token: str) -> Any:
         response = handle_message(text, username)
         await update.message.reply_text(response)
 
-    app = ApplicationBuilder().token(token).build()
-    app.add_handler(CommandHandler("recommendations", recommendations_handler))
+    app = application_builder().token(token).build()
+    app.add_handler(command_handler("recommendations", recommendations_handler))
     return app

@@ -66,7 +66,13 @@ def get_applied_versions() -> set[str]:
         with conn.cursor() as cur:
             cur.execute("SELECT version FROM schema_migrations ORDER BY version")
             rows = cur.fetchall()
-    return {row["version"] for row in rows}
+    versions: set[str] = set()
+    for row in rows:
+        if isinstance(row, dict):
+            versions.add(str(row["version"]))
+        else:
+            versions.add(str(row[0]))
+    return versions
 
 
 def get_pending_migrations(

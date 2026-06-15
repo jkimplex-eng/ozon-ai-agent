@@ -374,9 +374,10 @@ def rollback(target: str) -> None:
 @click.option("--output", "-o", default=None, help="Output file path")
 @click.option("--save-pending", is_flag=True, default=False, help="Save as PENDING approvals")
 @click.option("--force", is_flag=True, default=False, help="Force save even if duplicate exists")
+@click.option("--calibrated", is_flag=True, default=False, help="Apply historical calibration")
 def recommendations(
     sku: str | None, top: int, as_json: bool, output: str | None,
-    save_pending: bool, force: bool,
+    save_pending: bool, force: bool, calibrated: bool,
 ) -> None:
     """Generate recommendations from current data."""
     import json
@@ -426,6 +427,27 @@ def recommendations(
     if not recs:
         console.print("[yellow]No recommendations generated.[/]")
         return
+
+    calibration_factor = None
+    if calibrated:
+        from .approval.models import RecommendationStatus
+        from .approval.repository import list_recommendations as list_stored
+        from .learning.confidence_calibration import get_calibration_factor
+        from .learning.outcome_learning import build_learning_samples
+
+        stored = list_stored(status=RecommendationStatus.OBSERVED, limit=100)
+        outcomes = []
+        for s in stored:
+            from .approval.repository import list_outcomes
+            outcomes.extend(list_outcomes(s.id))
+        if stored and outcomes:
+            samples = build_learning_samples(stored, outcomes)
+            calibration_factor = get_calibration_factor(samples)
+            console.print(
+                f"[bold blue]Calibration factor: {calibration_factor:.2f}[/]"
+            )
+        else:
+            console.print("[yellow]No observed outcomes for calibration.[/]")
 
     if save_pending:
         from .approval.models import RecommendationStatus
@@ -663,6 +685,166 @@ def migrate_status_cmd() -> None:
     if status["pending_files"]:
         table.add_row("Pending files", ", ".join(status["pending_files"]))
     console.print(table)
+
+
+@main.group()
+def learning() -> None:
+    """Outcome learning and confidence calibration."""
+
+
+@learning.command("summary")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output JSON")
+@click.option("--output", "-o", default=None, help="Output file path")
+def learning_summary(as_json: bool, output: str | None) -> None:
+    """Show learning summary from observed outcomes."""
+    import json as json_mod
+
+    from .approval.models import RecommendationStatus
+    from .approval.repository import list_recommendations as list_stored
+    from .learning.learning_summary import format_learning_report, learning_report_to_dict
+    from .learning.outcome_learning import (
+        build_learning_samples,
+        calculate_action_accuracy,
+        calculate_recommendation_accuracy,
+        calculate_sku_accuracy,
+    )
+
+    stored = list_stored(status=RecommendationStatus.OBSERVED, limit=200)
+    if not stored:
+        console.print("[yellow]No observed recommendations found.[/]")
+        return
+
+    outcomes = []
+    for s in stored:
+        from .approval.repository import list_outcomes
+        outcomes.extend(list_outcomes(s.id))
+
+    samples = build_learning_samples(stored, outcomes)
+    accuracy = calculate_recommendation_accuracy(samples)
+    by_action = calculate_action_accuracy(samples)
+    by_sku = calculate_sku_accuracy(samples)
+
+    if as_json or output:
+        data = learning_report_to_dict(
+            accuracy, by_action=by_action, by_sku=by_sku
+        )
+        text = json_mod.dumps(data, ensure_ascii=False, indent=2)
+        if output:
+            with open(output, "w", encoding="utf-8") as f:
+                f.write(text)
+            console.print(f"[green]Saved to {output}[/]")
+        else:
+            console.print(text)
+    else:
+        console.print(format_learning_report(
+            accuracy, by_action=by_action, by_sku=by_sku
+        ))
+
+
+@learning.command("calibrate")
+def learning_calibrate() -> None:
+    """Show confidence calibration from historical outcomes."""
+    from .approval.models import RecommendationStatus
+    from .approval.repository import list_recommendations as list_stored
+    from .learning.confidence_calibration import calibrate_confidence
+    from .learning.learning_summary import format_calibration
+    from .learning.outcome_learning import build_learning_samples
+
+    stored = list_stored(status=RecommendationStatus.OBSERVED, limit=200)
+    if not stored:
+        console.print("[yellow]No observed recommendations found.[/]")
+        return
+
+    outcomes = []
+    for s in stored:
+        from .approval.repository import list_outcomes
+        outcomes.extend(list_outcomes(s.id))
+
+    samples = build_learning_samples(stored, outcomes)
+    calibration = calibrate_confidence(samples)
+    console.print(format_calibration(calibration))
+
+
+@learning.command("backtest")
+def learning_backtest() -> None:
+    """Run backtest on observed outcomes."""
+    from .approval.models import RecommendationStatus
+    from .approval.repository import list_recommendations as list_stored
+    from .learning.backtesting import backtest_recommendations
+    from .learning.learning_summary import format_backtest
+
+    stored = list_stored(status=RecommendationStatus.OBSERVED, limit=200)
+    if not stored:
+        console.print("[yellow]No observed recommendations found.[/]")
+        return
+
+    outcomes = []
+    for s in stored:
+        from .approval.repository import list_outcomes
+        outcomes.extend(list_outcomes(s.id))
+
+    bt = backtest_recommendations([], stored, outcomes)
+    console.print(format_backtest(bt))
+
+
+@learning.command("by-action")
+def learning_by_action() -> None:
+    """Show accuracy grouped by action type."""
+    from .approval.models import RecommendationStatus
+    from .approval.repository import list_recommendations as list_stored
+    from .learning.learning_summary import format_accuracy
+    from .learning.outcome_learning import build_learning_samples, calculate_action_accuracy
+
+    stored = list_stored(status=RecommendationStatus.OBSERVED, limit=200)
+    if not stored:
+        console.print("[yellow]No observed recommendations found.[/]")
+        return
+
+    outcomes = []
+    for s in stored:
+        from .approval.repository import list_outcomes
+        outcomes.extend(list_outcomes(s.id))
+
+    samples = build_learning_samples(stored, outcomes)
+    by_action = calculate_action_accuracy(samples)
+
+    if not by_action:
+        console.print("[yellow]No action data available.[/]")
+        return
+
+    for action, acc in by_action.items():
+        console.print(f"\n[bold]{action}[/]:")
+        console.print(format_accuracy(acc))
+
+
+@learning.command("by-sku")
+def learning_by_sku() -> None:
+    """Show accuracy grouped by SKU."""
+    from .approval.models import RecommendationStatus
+    from .approval.repository import list_recommendations as list_stored
+    from .learning.learning_summary import format_accuracy
+    from .learning.outcome_learning import build_learning_samples, calculate_sku_accuracy
+
+    stored = list_stored(status=RecommendationStatus.OBSERVED, limit=200)
+    if not stored:
+        console.print("[yellow]No observed recommendations found.[/]")
+        return
+
+    outcomes = []
+    for s in stored:
+        from .approval.repository import list_outcomes
+        outcomes.extend(list_outcomes(s.id))
+
+    samples = build_learning_samples(stored, outcomes)
+    by_sku = calculate_sku_accuracy(samples)
+
+    if not by_sku:
+        console.print("[yellow]No SKU data available.[/]")
+        return
+
+    for sku, acc in by_sku.items():
+        console.print(f"\n[bold]{sku}[/]:")
+        console.print(format_accuracy(acc))
 
 
 if __name__ == "__main__":

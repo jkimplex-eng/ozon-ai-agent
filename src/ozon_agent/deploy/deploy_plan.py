@@ -220,6 +220,13 @@ def format_plan_text(plan: DeployPlan, decision: DeployDecision) -> str:
         lines.append("")
         lines.append("Manual/automatic migration step required before restart.")
 
+    learning_dir = os.path.join(os.path.dirname(__file__), "..", "learning")
+    if os.path.isdir(learning_dir):
+        lines.append("")
+        lines.append("Learning module detected")
+        lines.append("No migration required")
+        lines.append("Read-only learning mode")
+
     lines.append("=" * 60)
     return "\n".join(lines)
 
@@ -251,7 +258,7 @@ def scan_decision_modules_forbidden() -> list[str]:
 
 def scan_approval_telegram_forbidden() -> list[str]:
     found: list[str] = []
-    for module_name in ("approval", "telegram"):
+    for module_name in ("approval", "telegram", "learning"):
         module_dir = os.path.join(os.path.dirname(__file__), "..", module_name)
         if not os.path.isdir(module_dir):
             continue
