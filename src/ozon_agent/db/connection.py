@@ -5,17 +5,29 @@ from contextlib import contextmanager
 from typing import Any
 
 import psycopg
+from dotenv import find_dotenv, load_dotenv
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 _pool: ConnectionPool | None = None
+_DEFAULT_DATABASE_URL = "postgresql://ozon_agent:ozon_agent@localhost:5432/ozon_agent"
+
+
+def _project_dotenv_path() -> str:
+    return os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env")
+    )
+
+
+def _load_database_env() -> None:
+    discovered_path = find_dotenv(filename=".env", usecwd=True)
+    dotenv_path = discovered_path or _project_dotenv_path()
+    load_dotenv(dotenv_path=dotenv_path, override=False)
 
 
 def get_database_url() -> str:
-    return os.environ.get(
-        "DATABASE_URL",
-        "postgresql://ozon_agent:ozon_agent@localhost:5432/ozon_agent"
-    )
+    _load_database_env()
+    return os.environ.get("DATABASE_URL", _DEFAULT_DATABASE_URL)
 
 
 def init_pool(min_size: int = 2, max_size: int = 10) -> ConnectionPool:
