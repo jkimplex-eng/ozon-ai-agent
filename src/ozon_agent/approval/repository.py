@@ -78,21 +78,8 @@ def list_recommendations(
     sku: str | None = None,
     limit: int = 50,
 ) -> list[StoredRecommendation]:
-    sql = """
-        SELECT * FROM recommendations
-        WHERE (%(status)s IS NULL OR status = %(status)s)
-          AND (%(sku)s IS NULL OR sku = %(sku)s)
-        ORDER BY created_at DESC
-        LIMIT %(limit)s
-    """
-    rows = _fetch_all(
-        sql,
-        {
-            "status": status.value if status is not None else None,
-            "sku": sku,
-            "limit": limit,
-        },
-    )
+    sql, params = _build_list_recommendations_query(status=status, sku=sku, limit=limit)
+    rows = _fetch_all(sql, params)
     return [_row_to_recommendation(row) for row in rows]
 
 
@@ -248,6 +235,28 @@ def _json_to_dict(value: Any) -> dict[str, Any]:
     if value in (None, ""):
         return {}
     return dict(json.loads(str(value)))
+
+
+def _build_list_recommendations_query(
+    status: RecommendationStatus | None,
+    sku: str | None,
+    limit: int,
+) -> tuple[str, dict[str, Any]]:
+    where_clauses: list[str] = []
+    params: dict[str, Any] = {"limit": limit}
+    if status is not None:
+        where_clauses.append("status = %(status)s")
+        params["status"] = status.value
+    if sku is not None:
+        where_clauses.append("sku = %(sku)s")
+        params["sku"] = sku
+
+    sql_lines = ["SELECT * FROM recommendations"]
+    if where_clauses:
+        sql_lines.append("WHERE " + " AND ".join(where_clauses))
+    sql_lines.append("ORDER BY created_at DESC")
+    sql_lines.append("LIMIT %(limit)s")
+    return "\n".join(sql_lines), params
 
 
 def _fetch_all(sql: str, params: dict[str, Any]) -> list[dict[str, Any]]:

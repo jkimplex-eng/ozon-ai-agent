@@ -11,6 +11,7 @@ from ozon_agent.approval.models import (
     StoredRecommendation,
 )
 from ozon_agent.approval.repository import (
+    _build_list_recommendations_query,
     get_recommendation,
     list_recommendations,
     override_connection_factory,
@@ -102,6 +103,23 @@ def test_empty_database_results() -> None:
         assert list_recommendations() == []
 
 
+def test_list_recommendations_without_status_filter() -> None:
+    sql, params = _build_list_recommendations_query(status=None, sku=None, limit=50)
+    assert "status = %(status)s" not in sql
+    assert "sku = %(sku)s" not in sql
+    assert params == {"limit": 50}
+
+
+def test_list_recommendations_with_pending_status_filter() -> None:
+    sql, params = _build_list_recommendations_query(
+        status=RecommendationStatus.PENDING,
+        sku=None,
+        limit=50,
+    )
+    assert "WHERE status = %(status)s" in sql
+    assert params["status"] == "PENDING"
+
+
 class _FakeCursor:
     def __init__(self, storage: dict[str, list[dict[str, Any]]]) -> None:
         self.storage = storage
@@ -154,9 +172,9 @@ class _FakeCursor:
             return
         if sql.strip().startswith("SELECT * FROM recommendations"):
             rows = [deepcopy(row) for row in self.storage["recommendations"]]
-            if params["status"] is not None:
+            if "status" in params:
                 rows = [row for row in rows if row["status"] == params["status"]]
-            if params["sku"] is not None:
+            if "sku" in params:
                 rows = [row for row in rows if row["sku"] == params["sku"]]
             rows.sort(key=lambda item: item["created_at"], reverse=True)
             self._rows = rows[: int(params["limit"])]

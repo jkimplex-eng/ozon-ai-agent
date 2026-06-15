@@ -27,6 +27,15 @@ def test_learning_summary_empty() -> None:
         assert "No observed" in result.output
 
 
+def test_learning_summary_with_empty_db_does_not_fail() -> None:
+    runner = CliRunner()
+    with patch("ozon_agent.approval.repository.list_recommendations", return_value=[]):
+        with patch("ozon_agent.approval.repository.list_outcomes", return_value=[]):
+            result = runner.invoke(main, ["learning", "summary"])
+    assert result.exit_code == 0
+    assert "No observed" in result.output
+
+
 def test_learning_calibrate_empty() -> None:
     runner = CliRunner()
     with patch("ozon_agent.approval.repository.list_recommendations", return_value=[]):
