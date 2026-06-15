@@ -462,8 +462,8 @@ def recommendations(
                 )
                 if existing and existing[0].action.value == rec.action.value:
                     continue
-            stored = create_pending_recommendation(rec)
-            saved_ids.append(stored.id)
+            stored_rec = create_pending_recommendation(rec)
+            saved_ids.append(stored_rec.id)
 
         if saved_ids:
             console.print(f"[green]Saved {len(saved_ids)} pending recommendation(s):[/]")
