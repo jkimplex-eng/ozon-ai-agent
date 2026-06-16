@@ -1120,6 +1120,86 @@ def api_describe_cmd(client: str, method: str) -> None:
 
 
 @main.group()
+def mcp() -> None:
+    """Inspect Ozon MCP discovery layer."""
+
+
+@mcp.command("tools")
+def mcp_tools_cmd() -> None:
+    """List discovered MCP tools."""
+    from .mcp.server import MCPServer
+
+    server = MCPServer()
+    table = Table(title="Ozon MCP Tools")
+    table.add_column("Tool")
+    table.add_column("Category")
+    table.add_column("Description")
+    for tool in server.list_tools()[:50]:
+        table.add_row(tool.name, tool.category, tool.description or "-")
+    console.print(table)
+    console.print("[yellow]Execution disabled: discovery only.[/]")
+
+
+@mcp.command("show")
+@click.argument("name")
+def mcp_show_cmd(name: str) -> None:
+    """Show MCP tool metadata."""
+    from .mcp.server import MCPServer
+
+    server = MCPServer()
+    try:
+        description = server.describe_tool(name)
+    except KeyError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    metadata = description["endpoint_metadata"]
+    request_schema = description["request_schema"]
+    response_schema = description["response_schema"]
+    table = Table(title=f"Ozon MCP Tool: {name}")
+    table.add_column("Field")
+    table.add_column("Value")
+    table.add_row("Name", str(description["name"]))
+    table.add_row("Category", str(description["category"]))
+    table.add_row("Description", str(description["description"]) or "-")
+    if isinstance(metadata, dict):
+        table.add_row("Path", escape(str(metadata.get("path", "-"))))
+        table.add_row("HTTP method", str(metadata.get("method", "-")))
+        table.add_row("Method name", str(metadata.get("method_name", "-")))
+    request_schema_keys = "-"
+    if isinstance(request_schema, dict):
+        request_schema_keys = escape(", ".join(sorted(request_schema.keys()))) or "-"
+    response_schema_keys = "-"
+    if isinstance(response_schema, dict):
+        response_schema_keys = escape(", ".join(sorted(response_schema.keys()))) or "-"
+    table.add_row(
+        "Request schema keys",
+        request_schema_keys,
+    )
+    table.add_row(
+        "Response schema keys",
+        response_schema_keys,
+    )
+    console.print(table)
+
+
+@mcp.command("stats")
+def mcp_stats_cmd() -> None:
+    """Show MCP tool statistics."""
+    from .mcp.server import MCPServer
+
+    stats = MCPServer().stats()
+    table = Table(title="Ozon MCP Stats")
+    table.add_column("Metric")
+    table.add_column("Value")
+    table.add_row("Tools", str(stats["tools"]))
+    categories = stats["categories"]
+    if isinstance(categories, dict):
+        for category, count in categories.items():
+            table.add_row(str(category), str(count))
+    console.print(table)
+
+
+@main.group()
 def experiments() -> None:
     """Manage A/B experiments."""
 
