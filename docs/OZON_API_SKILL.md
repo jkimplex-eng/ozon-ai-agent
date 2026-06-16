@@ -94,9 +94,14 @@ Supported read-only generation helpers:
 - `generate_client_blueprint()`
 - `build_endpoint_map()`
 - `build_category_map()`
+- `generate_typed_client_stubs()`
+
+Typed stubs expose endpoint methods as safe request descriptors. They can prepare a request shape from Swagger metadata, but calling `execute()` raises `OzonApiExecutionDisabledError`.
 
 Additional CLI command:
 
 - `ozon-agent api client`
+- `ozon-agent api stubs`
+- `ozon-agent api stubs --category stocks`
 
 No real HTTP execution is implemented at this stage.

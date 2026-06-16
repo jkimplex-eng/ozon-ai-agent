@@ -71,7 +71,10 @@ def generate_client_blueprint() -> dict[str, Any]:
         modules=modules,
         category_counts=category_counts,
     )
-    return asdict(blueprint)
+    result = asdict(blueprint)
+    result["typed_stubs_available"] = True
+    result["execution_guard"] = "OzonApiExecutionDisabledError"
+    return result
 
 
 def _build_method_blueprint(endpoint: OzonApiEndpoint) -> ClientMethodBlueprint:

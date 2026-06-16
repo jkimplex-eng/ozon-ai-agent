@@ -1031,6 +1031,28 @@ def api_client_cmd() -> None:
     console.print(modules_table)
 
 
+@api.command("stubs")
+@click.option("--category", default=None, help="Filter by category, for example stocks")
+def api_stubs_cmd(category: str | None) -> None:
+    """Show generated typed read-only client stubs."""
+    from .integrations.ozon_api.client_stubs import generate_typed_client_stubs
+
+    client_stubs = generate_typed_client_stubs()
+    methods = client_stubs.list_methods(category=category)
+    title = "Ozon API Typed Client Stubs"
+    if category:
+        title = f"{title}: {category}"
+    table = Table(title=title)
+    table.add_column("Name")
+    table.add_column("Method")
+    table.add_column("Path")
+    table.add_column("Category")
+    for method in methods[:30]:
+        table.add_row(method.name, method.method, escape(method.path), method.category)
+    console.print(table)
+    console.print("[yellow]Execution disabled: stubs only prepare request descriptors.[/]")
+
+
 @main.group()
 def experiments() -> None:
     """Manage A/B experiments."""
