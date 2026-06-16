@@ -104,4 +104,45 @@ Additional CLI command:
 - `ozon-agent api stubs`
 - `ozon-agent api stubs --category stocks`
 
+## Typed Client Stubs
+
+Typed client stubs live under:
+
+- [C:\Users\user\Documents\Codex\2026-05-13\github\ozon-ai-agent\src\ozon_agent\integrations\ozon_api\clients](C:\Users\user\Documents\Codex\2026-05-13\github\ozon-ai-agent\src\ozon_agent\integrations\ozon_api\clients)
+
+Supported clients:
+
+- `products`
+- `stocks`
+- `prices`
+- `orders`
+- `analytics`
+- `finance`
+- `returns`
+- `reviews`
+
+Each client is generated from Swagger metadata at runtime. Methods return `OzonMethodDescriptor` objects and support:
+
+- `describe()`
+
+The base client stores:
+
+- endpoint metadata
+- request schema
+- response schema
+- category
+
+Registry helpers:
+
+- `list_clients()`
+- `get_client(name)`
+- `list_methods(client)`
+- `get_method(client, method)`
+
+CLI helpers:
+
+- `ozon-agent api clients`
+- `ozon-agent api methods products`
+- `ozon-agent api describe products product_info`
+
 No real HTTP execution is implemented at this stage.

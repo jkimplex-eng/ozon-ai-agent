@@ -1053,6 +1053,72 @@ def api_stubs_cmd(category: str | None) -> None:
     console.print("[yellow]Execution disabled: stubs only prepare request descriptors.[/]")
 
 
+@api.command("clients")
+def api_clients_cmd() -> None:
+    """List typed Ozon API clients."""
+    from .integrations.ozon_api.client_registry import list_clients
+
+    table = Table(title="Ozon API Typed Clients")
+    table.add_column("Client")
+    for client_name in list_clients():
+        table.add_row(client_name)
+    console.print(table)
+
+
+@api.command("methods")
+@click.argument("client")
+def api_methods_cmd(client: str) -> None:
+    """List methods for a typed Ozon API client."""
+    from .integrations.ozon_api.client_registry import list_methods
+
+    try:
+        method_names = list_methods(client)
+    except KeyError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    table = Table(title=f"Ozon API Methods: {client}")
+    table.add_column("Method")
+    for method_name in method_names:
+        table.add_row(method_name)
+    console.print(table)
+
+
+@api.command("describe")
+@click.argument("client")
+@click.argument("method")
+def api_describe_cmd(client: str, method: str) -> None:
+    """Describe one typed Ozon API client method."""
+    from .integrations.ozon_api.client_registry import get_method
+    from .skills.ozon_api.swagger_models import EndpointNotFoundError
+
+    try:
+        descriptor = get_method(client, method)
+    except (EndpointNotFoundError, KeyError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    description = descriptor.describe()
+    table = Table(title=f"Ozon API Describe: {client}.{method}")
+    table.add_column("Field")
+    table.add_column("Value")
+    table.add_row("Name", str(description["name"]))
+    table.add_row("Method name", str(description["method_name"]))
+    table.add_row("HTTP method", str(description["method"]))
+    table.add_row("Path", escape(str(description["path"])))
+    table.add_row("Summary", str(description["summary"]) or "-")
+    table.add_row("Description", str(description["description"]) or "-")
+    table.add_row("Tags", escape(", ".join(description["tags"])) or "-")
+    table.add_row("Category", str(description["category"]))
+    table.add_row(
+        "Request schema keys",
+        escape(", ".join(sorted(description["request_schema"].keys()))) or "-",
+    )
+    table.add_row(
+        "Response schema keys",
+        escape(", ".join(sorted(description["response_schema"].keys()))) or "-",
+    )
+    console.print(table)
+
+
 @main.group()
 def experiments() -> None:
     """Manage A/B experiments."""
