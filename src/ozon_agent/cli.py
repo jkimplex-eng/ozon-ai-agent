@@ -19,6 +19,12 @@ def main(verbose: bool) -> None:
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    from .skills.skill_loader import SkillLoaderError, load_skills
+
+    try:
+        load_skills()
+    except SkillLoaderError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 @main.command()
@@ -845,6 +851,378 @@ def learning_by_sku() -> None:
     for sku, acc in by_sku.items():
         console.print(f"\n[bold]{sku}[/]:")
         console.print(format_accuracy(acc))
+
+
+@main.group()
+def skills() -> None:
+    """Manage local skills registry."""
+
+
+@skills.command("list")
+def skills_list_cmd() -> None:
+    """List loaded skills."""
+    from .skills.skill_loader import list_skills
+
+    loaded_skills = list_skills()
+    table = Table(title=f"Skills ({len(loaded_skills)} loaded)")
+    table.add_column("Name")
+    table.add_column("Path")
+    for skill in loaded_skills:
+        table.add_row(skill.name, str(skill.path))
+    console.print(table)
+
+
+@skills.command("show")
+@click.argument("name")
+def skills_show_cmd(name: str) -> None:
+    """Show skill files and summary."""
+    from .skills.skill_loader import SkillNotFoundError, get_skill
+
+    try:
+        skill = get_skill(name)
+    except SkillNotFoundError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    table = Table(title=f"Skill: {skill.name}")
+    table.add_column("Field")
+    table.add_column("Value")
+    table.add_row("Path", str(skill.path))
+    table.add_row("SKILL.md", str(skill.skill_md_path))
+    table.add_row("rules.md", str(skill.rules_md_path))
+    table.add_row("examples.md", str(skill.examples_md_path))
+    console.print(table)
+    console.print("[bold]Preview[/]")
+    console.print(skill.skill_md.strip()[:600] or "(empty)")
+
+
+@skills.command("reload")
+def skills_reload_cmd() -> None:
+    """Reload skills from skills/index.yaml."""
+    from .skills.skill_loader import reload_skills
+
+    loaded_skills = reload_skills()
+    console.print(f"[green]Reloaded {len(loaded_skills)} skills[/]")
+
+
+@main.group()
+def experiments() -> None:
+    """Manage A/B experiments."""
+
+
+@experiments.command("create")
+@click.option("--sku", required=True, help="SKU to experiment on")
+@click.option("--hypothesis", required=True, help="Experiment hypothesis")
+@click.option("--action", required=True, help="Action to test")
+@click.option("--risk", default=None, help="Risk level")
+@click.option("--confidence", default=None, help="Confidence level")
+def experiments_create(
+    sku: str, hypothesis: str, action: str, risk: str | None, confidence: str | None,
+) -> None:
+    """Create a new experiment."""
+    from .experiments.workflow import create_new_experiment
+
+    exp = create_new_experiment(
+        sku=sku, hypothesis=hypothesis, action=action, risk=risk, confidence=confidence,
+    )
+    console.print(f"[green]Created experiment {exp.id[:8]}...[/]")
+
+
+@experiments.command("list")
+@click.option("--status", "-s", default=None, help="Filter by status")
+@click.option("--limit", default=20, help="Max results")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output JSON")
+def experiments_list(status: str | None, limit: int, as_json: bool) -> None:
+    """List experiments."""
+    import json as json_mod
+
+    from .experiments.experiment_summary import experiment_to_dict, format_experiment_list
+    from .experiments.models import ExperimentStatus
+    from .experiments.repository import list_experiments
+
+    status_enum = ExperimentStatus(status) if status else None
+    exps = list_experiments(status=status_enum, limit=limit)
+
+    if as_json:
+        data = [experiment_to_dict(e) for e in exps]
+        console.print(json_mod.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        console.print(format_experiment_list(exps))
+
+
+@experiments.command("show")
+@click.argument("exp_id")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output JSON")
+def experiments_show(exp_id: str, as_json: bool) -> None:
+    """Show experiment details."""
+    import json as json_mod
+
+    from .experiments.experiment_summary import experiment_to_dict, format_experiment_detail
+    from .experiments.repository import get_experiment
+
+    exp = get_experiment(exp_id)
+    if exp is None:
+        full_id = _resolve_short_experiment_id(exp_id)
+        if full_id:
+            exp = get_experiment(full_id)
+    if exp is None:
+        console.print(f"[red]Experiment {exp_id} not found.[/]")
+        return
+    if as_json:
+        console.print(json_mod.dumps(experiment_to_dict(exp), ensure_ascii=False, indent=2))
+    else:
+        console.print(format_experiment_detail(exp))
+
+
+@experiments.command("ready")
+@click.argument("exp_id")
+def experiments_ready(exp_id: str) -> None:
+    """Mark experiment as ready."""
+    from .experiments.workflow import mark_ready
+
+    try:
+        exp = mark_ready(exp_id, actor="cli")
+        console.print(f"[green]Experiment {exp.id[:8]}... marked READY[/]")
+    except Exception as e:
+        console.print(f"[red]Failed: {e}[/]")
+
+
+@experiments.command("start")
+@click.argument("exp_id")
+def experiments_start(exp_id: str) -> None:
+    """Start an experiment."""
+    from .experiments.workflow import mark_running
+
+    try:
+        exp = mark_running(exp_id, actor="cli")
+        console.print(f"[green]Experiment {exp.id[:8]}... started (RUNNING)[/]")
+    except Exception as e:
+        console.print(f"[red]Failed: {e}[/]")
+
+
+@experiments.command("pause")
+@click.argument("exp_id")
+def experiments_pause(exp_id: str) -> None:
+    """Pause an experiment."""
+    from .experiments.workflow import mark_paused
+
+    try:
+        exp = mark_paused(exp_id, actor="cli")
+        console.print(f"[yellow]Experiment {exp.id[:8]}... paused (PAUSED)[/]")
+    except Exception as e:
+        console.print(f"[red]Failed: {e}[/]")
+
+
+@experiments.command("resume")
+@click.argument("exp_id")
+def experiments_resume(exp_id: str) -> None:
+    """Resume a paused experiment."""
+    from .experiments.workflow import mark_running
+
+    try:
+        exp = mark_running(exp_id, actor="cli")
+        console.print(f"[green]Experiment {exp.id[:8]}... resumed (RUNNING)[/]")
+    except Exception as e:
+        console.print(f"[red]Failed: {e}[/]")
+
+
+@experiments.command("complete")
+@click.argument("exp_id")
+def experiments_complete(exp_id: str) -> None:
+    """Complete an experiment."""
+    from .experiments.workflow import mark_completed
+
+    try:
+        exp = mark_completed(exp_id, actor="cli")
+        console.print(f"[green]Experiment {exp.id[:8]}... completed (COMPLETED)[/]")
+    except Exception as e:
+        console.print(f"[red]Failed: {e}[/]")
+
+
+@experiments.command("cancel")
+@click.argument("exp_id")
+@click.option("--reason", required=True, help="Cancellation reason")
+def experiments_cancel(exp_id: str, reason: str) -> None:
+    """Cancel an experiment."""
+    from .experiments.workflow import mark_cancelled
+
+    try:
+        exp = mark_cancelled(exp_id, reason=reason, actor="cli")
+        console.print(f"[yellow]Experiment {exp.id[:8]}... cancelled: {reason}[/]")
+    except Exception as e:
+        console.print(f"[red]Failed: {e}[/]")
+
+
+@experiments.command("fail")
+@click.argument("exp_id")
+@click.option("--reason", required=True, help="Failure reason")
+def experiments_fail(exp_id: str, reason: str) -> None:
+    """Mark experiment as failed."""
+    from .experiments.workflow import mark_failed
+
+    try:
+        exp = mark_failed(exp_id, reason=reason, actor="cli")
+        console.print(f"[red]Experiment {exp.id[:8]}... failed: {reason}[/]")
+    except Exception as e:
+        console.print(f"[red]Failed: {e}[/]")
+
+
+@experiments.command("metrics")
+@click.argument("exp_id")
+@click.option("--baseline-orders", type=float, default=None)
+@click.option("--baseline-revenue", type=float, default=None)
+@click.option("--baseline-drr", type=float, default=None)
+@click.option("--current-orders", type=float, default=None)
+@click.option("--current-revenue", type=float, default=None)
+@click.option("--current-drr", type=float, default=None)
+def experiments_metrics(
+    exp_id: str,
+    baseline_orders: float | None,
+    baseline_revenue: float | None,
+    baseline_drr: float | None,
+    current_orders: float | None,
+    current_revenue: float | None,
+    current_drr: float | None,
+) -> None:
+    """Update experiment metrics."""
+    from .experiments.workflow import update_metrics
+
+    try:
+        exp = update_metrics(
+            exp_id,
+            baseline_orders=baseline_orders,
+            baseline_revenue=baseline_revenue,
+            baseline_drr=baseline_drr,
+            current_orders=current_orders,
+            current_revenue=current_revenue,
+            current_drr=current_drr,
+        )
+        console.print(f"[green]Updated metrics for {exp.id[:8]}...[/]")
+    except Exception as e:
+        console.print(f"[red]Failed: {e}[/]")
+
+
+@experiments.command("events")
+@click.argument("exp_id")
+def experiments_events(exp_id: str) -> None:
+    """Show experiment events."""
+    from .experiments.repository import list_experiment_events
+
+    events = list_experiment_events(exp_id)
+    if not events:
+        console.print(f"[yellow]No events for {exp_id}[/]")
+        return
+
+    table = Table(title=f"Events for {exp_id[:8]}...")
+    table.add_column("Time")
+    table.add_column("Type")
+    table.add_column("From")
+    table.add_column("To")
+    table.add_column("Actor")
+    table.add_column("Reason")
+
+    for event in events:
+        table.add_row(
+            event.created_at.strftime("%Y-%m-%d %H:%M"),
+            event.event_type.value,
+            event.from_status.value if event.from_status else "",
+            event.to_status.value if event.to_status else "",
+            event.actor or "",
+            event.reason or "",
+        )
+    console.print(table)
+
+
+@experiments.command("evaluate")
+@click.argument("exp_id")
+def experiments_evaluate(exp_id: str) -> None:
+    """Evaluate experiment results."""
+    from .experiments.workflow import evaluate_experiment
+
+    try:
+        exp = evaluate_experiment(exp_id)
+        console.print(f"[green]Evaluated {exp.id[:8]}...[/]")
+        if exp.success_score is not None:
+            console.print(f"  Success score: {exp.success_score:.4f}")
+        if exp.direction_accuracy is not None:
+            console.print(f"  Direction accuracy: {exp.direction_accuracy:.4f}")
+    except Exception as e:
+        console.print(f"[red]Failed: {e}[/]")
+
+
+@experiments.command("report")
+@click.argument("exp_id")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output JSON")
+def experiments_report(exp_id: str, as_json: bool) -> None:
+    """Show experiment report."""
+    import json as json_mod
+
+    from .experiments.experiment_summary import experiment_to_dict, format_experiment_report
+    from .experiments.repository import get_experiment
+
+    exp = get_experiment(exp_id)
+    if exp is None:
+        full_id = _resolve_short_experiment_id(exp_id)
+        if full_id:
+            exp = get_experiment(full_id)
+    if exp is None:
+        console.print(f"[red]Experiment {exp_id} not found.[/]")
+        return
+    if as_json:
+        console.print(json_mod.dumps(experiment_to_dict(exp), ensure_ascii=False, indent=2))
+    else:
+        console.print(format_experiment_report(exp))
+
+
+@experiments.command("create-from-recommendation")
+@click.argument("rec_id")
+def experiments_create_from_recommendation(rec_id: str) -> None:
+    """Create experiment from an approved/executed recommendation."""
+    from .approval.models import RecommendationStatus
+    from .approval.repository import get_recommendation
+    from .experiments.workflow import create_from_recommendation
+
+    rec = get_recommendation(rec_id)
+    if rec is None:
+        console.print(f"[red]Recommendation {rec_id} not found.[/]")
+        return
+
+    if rec.status not in (RecommendationStatus.APPROVED, RecommendationStatus.EXECUTED):
+        console.print(
+            f"[red]Recommendation must be APPROVED or EXECUTED, "
+            f"got {rec.status.value}[/]"
+        )
+        return
+
+    hypothesis = f"Test recommendation {rec.action.value} for {rec.sku}"
+    expected_effect = rec.expected_effect if isinstance(rec.expected_effect, dict) else {}
+    risk_val = rec.risk_level.value if rec.risk_level else None
+    conf_val = rec.confidence_level.value if rec.confidence_level else None
+
+    exp = create_from_recommendation(
+        recommendation_id=rec.id,
+        sku=rec.sku,
+        action=rec.action.value,
+        hypothesis=hypothesis,
+        risk=risk_val,
+        confidence=conf_val,
+        expected_effect=expected_effect,
+    )
+    console.print(
+        f"[green]Created experiment {exp.id[:8]}... "
+        f"from recommendation {rec.id[:8]}...[/]"
+    )
+
+
+def _resolve_short_experiment_id(short_id: str) -> str | None:
+    if len(short_id) >= 36:
+        return short_id
+    from .experiments.repository import list_experiments
+
+    exps = list_experiments(limit=100)
+    for exp in exps:
+        if exp.id.startswith(short_id):
+            return exp.id
+    return None
 
 
 if __name__ == "__main__":

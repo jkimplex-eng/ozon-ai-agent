@@ -2,7 +2,7 @@
 
 ## Last Updated
 
-2026-06-14
+2026-06-16
 
 ## Completed Features
 
@@ -27,6 +27,17 @@
 - Backtesting: success rate, error analysis, profit lift estimation
 - CLI: `ozon-agent learning summary/calibrate/backtest/by-action/by-sku`
 
+### Phase 5: Autonomous Experiments
+- Experiment lifecycle: DRAFT → READY → RUNNING → PAUSED/COMPLETED/CANCELLED/FAILED
+- Experiment events tracking with audit trail
+- Metrics update and evaluation with success_score and direction_accuracy
+- CLI: `ozon-agent experiments create/list/show/ready/start/pause/resume/complete/cancel/fail/metrics/events/evaluate/report`
+- CLI: `ozon-agent experiments create-from-recommendation <id>` (APPROVED/EXECUTED only)
+- Telegram: `/experiments list/show/ready/start/pause/complete/cancel/report`
+- Migration: `migrations/003_experiments.sql`
+- Supervisor scans experiments module for forbidden keywords
+- Deploy plan shows experiments module as read-only/control-plane
+
 ### Deploy Layer
 - Supervisor with forbidden keyword scanning across all modules
 - Deployer blocks on forbidden keywords, detects migrations
@@ -36,4 +47,4 @@
 
 - ruff: All checks passed
 - mypy: 2 expected errors (telegram optional dependency)
-- pytest: 84/84 pass (excluding subprocess-hanging test)
+- pytest: 110/110 pass (excluding subprocess-hanging test)

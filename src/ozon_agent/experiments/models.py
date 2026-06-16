@@ -6,8 +6,6 @@ from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
-from ozon_agent.decision.models import RecommendationAction, RiskLevel
-
 
 class ExperimentStatus(StrEnum):
     DRAFT = "DRAFT"
@@ -19,33 +17,65 @@ class ExperimentStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class ExperimentEventType(StrEnum):
+    CREATED = "CREATED"
+    STATUS_CHANGE = "STATUS_CHANGE"
+    METRICS_UPDATE = "METRICS_UPDATE"
+    EVALUATED = "EVALUATED"
+
+
+EXPERIMENT_TRANSITIONS: dict[ExperimentStatus, set[ExperimentStatus]] = {
+    ExperimentStatus.DRAFT: {ExperimentStatus.READY, ExperimentStatus.CANCELLED},
+    ExperimentStatus.READY: {ExperimentStatus.RUNNING, ExperimentStatus.CANCELLED},
+    ExperimentStatus.RUNNING: {
+        ExperimentStatus.PAUSED,
+        ExperimentStatus.COMPLETED,
+        ExperimentStatus.CANCELLED,
+        ExperimentStatus.FAILED,
+    },
+    ExperimentStatus.PAUSED: {
+        ExperimentStatus.RUNNING,
+        ExperimentStatus.CANCELLED,
+        ExperimentStatus.FAILED,
+    },
+    ExperimentStatus.COMPLETED: set(),
+    ExperimentStatus.CANCELLED: set(),
+    ExperimentStatus.FAILED: set(),
+}
+
+
 @dataclass(slots=True)
 class Experiment:
     id: str
     created_at: datetime
     updated_at: datetime
     sku: str
-    title: str
     hypothesis: str
-    action: RecommendationAction
-    status: ExperimentStatus
+    action: str
+    risk: str | None = None
+    confidence: str | None = None
+    status: ExperimentStatus = ExperimentStatus.DRAFT
     recommendation_id: str | None = None
-    risk_level: RiskLevel | None = None
-    confidence_score: float | None = None
+    baseline_orders: float = 0.0
+    baseline_revenue: float = 0.0
+    baseline_drr: float = 0.0
+    current_orders: float = 0.0
+    current_revenue: float = 0.0
+    current_drr: float = 0.0
+    success_score: float | None = None
+    direction_accuracy: float | None = None
+    actual_effect: dict[str, Any] = field(default_factory=dict)
+    expected_effect: dict[str, Any] = field(default_factory=dict)
+    metrics: dict[str, Any] = field(default_factory=dict)
+    summary: str | None = None
     started_at: datetime | None = None
-    ended_at: datetime | None = None
-    created_by: str | None = None
-    notes: str | None = None
-
-
-@dataclass(slots=True)
-class ExperimentMetric:
-    id: str
-    experiment_id: str
-    period: str
-    metric_name: str
-    metric_value: float | None
-    created_at: datetime
+    paused_at: datetime | None = None
+    completed_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    failed_at: datetime | None = None
+    cancel_reason: str | None = None
+    fail_reason: str | None = None
+    created_by: str = "system"
 
 
 @dataclass(slots=True)
@@ -53,43 +83,12 @@ class ExperimentEvent:
     id: str
     experiment_id: str
     created_at: datetime
-    event_type: str
-    message: str
+    event_type: ExperimentEventType
+    from_status: ExperimentStatus | None = None
+    to_status: ExperimentStatus | None = None
+    actor: str | None = None
+    reason: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class ExperimentOutcome:
-    id: str
-    experiment_id: str
-    created_at: datetime
-    success_score: float | None
-    direction_accuracy: float | None
-    actual_effect: dict[str, Any]
-    expected_effect: dict[str, Any]
-    summary: str
-
-
-@dataclass(slots=True)
-class ExperimentEvaluation:
-    success_score: float | None
-    direction_accuracy: float | None
-    actual_effect: dict[str, float]
-    expected_effect: dict[str, Any]
-    summary: str
-
-
-@dataclass(slots=True)
-class ExperimentCreateRequest:
-    sku: str
-    title: str
-    hypothesis: str
-    action: RecommendationAction
-    recommendation_id: str | None = None
-    risk_level: RiskLevel | None = None
-    confidence_score: float | None = None
-    created_by: str | None = None
-    notes: str | None = None
 
 
 class InvalidExperimentTransitionError(ValueError):
@@ -114,72 +113,28 @@ class ExperimentNotFoundError(LookupError):
         self.experiment_id = experiment_id
 
 
-def build_experiment(request: ExperimentCreateRequest) -> Experiment:
+def create_experiment(
+    sku: str,
+    hypothesis: str,
+    action: str,
+    risk: str | None = None,
+    confidence: str | None = None,
+    expected_effect: dict[str, Any] | None = None,
+    recommendation_id: str | None = None,
+    created_by: str = "system",
+) -> Experiment:
     now = datetime.now(UTC)
     return Experiment(
         id=str(uuid4()),
         created_at=now,
         updated_at=now,
-        recommendation_id=request.recommendation_id,
-        sku=request.sku,
-        title=request.title,
-        hypothesis=request.hypothesis,
-        action=request.action,
+        sku=sku,
+        hypothesis=hypothesis,
+        action=action,
+        risk=risk,
+        confidence=confidence,
         status=ExperimentStatus.DRAFT,
-        risk_level=request.risk_level,
-        confidence_score=request.confidence_score,
-        created_by=request.created_by,
-        notes=request.notes,
-    )
-
-
-def build_experiment_metric(
-    experiment_id: str,
-    period: str,
-    metric_name: str,
-    metric_value: float | None,
-) -> ExperimentMetric:
-    return ExperimentMetric(
-        id=str(uuid4()),
-        experiment_id=experiment_id,
-        period=period,
-        metric_name=metric_name,
-        metric_value=metric_value,
-        created_at=datetime.now(UTC),
-    )
-
-
-def build_experiment_event(
-    experiment_id: str,
-    event_type: str,
-    message: str,
-    metadata: dict[str, Any] | None = None,
-) -> ExperimentEvent:
-    return ExperimentEvent(
-        id=str(uuid4()),
-        experiment_id=experiment_id,
-        created_at=datetime.now(UTC),
-        event_type=event_type,
-        message=message,
-        metadata=dict(metadata or {}),
-    )
-
-
-def build_experiment_outcome(
-    experiment_id: str,
-    success_score: float | None,
-    direction_accuracy: float | None,
-    actual_effect: dict[str, Any],
-    expected_effect: dict[str, Any],
-    summary: str,
-) -> ExperimentOutcome:
-    return ExperimentOutcome(
-        id=str(uuid4()),
-        experiment_id=experiment_id,
-        created_at=datetime.now(UTC),
-        success_score=success_score,
-        direction_accuracy=direction_accuracy,
-        actual_effect=dict(actual_effect),
-        expected_effect=dict(expected_effect),
-        summary=summary,
+        recommendation_id=recommendation_id,
+        expected_effect=expected_effect or {},
+        created_by=created_by,
     )

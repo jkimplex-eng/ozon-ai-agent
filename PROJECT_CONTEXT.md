@@ -26,7 +26,8 @@ Builder (AI/Manual) → Supervisor → Deployer → VPS
 | `decision/` | Recommendation engine, opportunity detection, confidence/risk scoring |
 | `approval/` | Approval workflow, outcome tracking, state machine |
 | `learning/` | Outcome learning, confidence calibration, backtesting |
-| `telegram/` | Telegram bot for recommendation approvals |
+| `experiments/` | A/B experiment tracking, lifecycle, metrics, evaluation |
+| `telegram/` | Telegram bot for recommendation approvals and experiment management |
 | `supervisor/` | Audit reports, deployment decisions, safety checks |
 | `deploy/` | VPS deployment, health checks, rollback |
 | `models/` | Data models (Pydantic) |
@@ -50,13 +51,15 @@ Builder (AI/Manual) → Supervisor → Deployer → VPS
 | 4 | Decision Engine | Done |
 | 4.5 | Approval Workflow | Done |
 | 4.6 | Outcome Learning | Done |
-| 5 | Autonomous Experiments | Pending |
+| 5 | Autonomous Experiments | Done |
 
 ## Safety Model
 
 - Decision Engine: recommendations only, no execution, no external API calls
 - Approval Workflow: approval/rejection only, no Ozon state mutations
 - Learning: read-only analysis, no Ozon actions, no external APIs
+- Experiments: control-plane only, no automatic Ozon actions, no external APIs
 - Telegram: approve/reject only, no price/ad/stock API mutation
+- Telegram experiments: manage experiment state only, no Ozon write APIs
 - Supervisor: scans for forbidden keywords in all modules
 - Deployer: blocks deployment if forbidden keywords found or tests fail

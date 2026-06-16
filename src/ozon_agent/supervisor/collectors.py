@@ -87,7 +87,8 @@ ROADMAP: dict[str, Any] = {
         {"id": 3, "name": "Forecasting", "status": "done"},
         {"id": 4, "name": "Decision Engine", "status": "done"},
         {"id": 4.5, "name": "Approval Workflow", "status": "done"},
-        {"id": 5, "name": "Autonomous Experiments", "status": "pending"},
+        {"id": 4.6, "name": "Outcome Learning", "status": "done"},
+        {"id": 5, "name": "Autonomous Experiments", "status": "done"},
     ],
     "next_after_forecasting": "Decision Engine",
     "decision_engine_scope": [
@@ -185,7 +186,12 @@ def check_decision_engine_safety() -> list[str]:
 
 
 def recommend_next_task(completed_phases: list[str]) -> str:
-    if "Approval Workflow" in completed_phases:
+    if "Outcome Learning" in completed_phases and "Autonomous Experiments" in completed_phases:
+        return (
+            "Phase 5.1: Experiment result automation — "
+            "Auto-evaluate experiments on completion, guarded auto-approval for low-risk."
+        )
+    if "Approval Workflow" in completed_phases and "Autonomous Experiments" not in completed_phases:
         return (
             "Phase 5: Autonomous Experiments — "
             "Build A/B testing framework and automated experiment tracking."
@@ -218,7 +224,7 @@ def check_approval_safety() -> list[str]:
     import os
 
     risks: list[str] = []
-    for module_name in ("approval", "telegram", "learning"):
+    for module_name in ("approval", "telegram", "learning", "experiments"):
         module_dir = os.path.join(os.path.dirname(__file__), "..", module_name)
         if not os.path.isdir(module_dir):
             continue
@@ -249,10 +255,14 @@ def check_migration_exists() -> list[str]:
         risks.append("migrations/ directory not found")
         return risks
     has_approval_migration = False
+    has_experiments_migration = False
     for filename in os.listdir(migrations_dir):
         if "approval" in filename.lower() or "recommendation" in filename.lower():
             has_approval_migration = True
-            break
+        if "experiment" in filename.lower():
+            has_experiments_migration = True
     if not has_approval_migration:
         risks.append("No approval/recommendation migration found in migrations/")
+    if not has_experiments_migration:
+        risks.append("No experiments migration found in migrations/ (003_experiments.sql)")
     return risks

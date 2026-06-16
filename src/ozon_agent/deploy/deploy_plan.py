@@ -227,6 +227,13 @@ def format_plan_text(plan: DeployPlan, decision: DeployDecision) -> str:
         lines.append("No migration required")
         lines.append("Read-only learning mode")
 
+    experiments_dir = os.path.join(os.path.dirname(__file__), "..", "experiments")
+    if os.path.isdir(experiments_dir):
+        lines.append("")
+        lines.append("Experiments module detected")
+        lines.append("Control-plane only — no automatic Ozon actions")
+        lines.append("Read-only experiment management")
+
     lines.append("=" * 60)
     return "\n".join(lines)
 
@@ -258,7 +265,7 @@ def scan_decision_modules_forbidden() -> list[str]:
 
 def scan_approval_telegram_forbidden() -> list[str]:
     found: list[str] = []
-    for module_name in ("approval", "telegram", "learning"):
+    for module_name in ("approval", "telegram", "learning", "experiments"):
         module_dir = os.path.join(os.path.dirname(__file__), "..", module_name)
         if not os.path.isdir(module_dir):
             continue

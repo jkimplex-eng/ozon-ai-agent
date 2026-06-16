@@ -184,6 +184,16 @@ def test_check_approval_safety_no_forbidden():
     assert risks == []
 
 
+def test_check_approval_safety_includes_experiments():
+    """Test approval safety check includes experiments module."""
+    risks = check_approval_safety()
+    assert isinstance(risks, list)
+    for risk in risks:
+        if "experiments" in risk.lower():
+            assert "forbidden" in risk.lower()
+            break
+
+
 def test_check_migration_exists():
     """Test migration check returns list."""
     risks = check_migration_exists()

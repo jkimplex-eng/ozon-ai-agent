@@ -243,6 +243,13 @@ def test_detect_pending_migrations_finds_approval():
     assert has_approval
 
 
+def test_detect_pending_migrations_finds_experiments():
+    """Test migration detection finds experiments migration."""
+    migrations = detect_pending_migrations()
+    has_experiments = any("experiment" in m.lower() for m in migrations)
+    assert has_experiments
+
+
 def test_format_plan_text_shows_migration():
     """Test deploy plan text shows migration info."""
     decision = DeployDecision(
@@ -252,3 +259,14 @@ def test_format_plan_text_shows_migration():
     plan = build_deploy_plan(decision, target="vps", branch="main", dry_run=True)
     text = format_plan_text(plan, decision)
     assert "Migration" in text or "migration" in text
+
+
+def test_format_plan_text_shows_experiments_module():
+    """Test deploy plan text shows experiments module info."""
+    decision = DeployDecision(
+        deploy_allowed=True, reason="OK", required_steps=[],
+        risk_level="low", supervisor_status="pass",
+    )
+    plan = build_deploy_plan(decision, target="vps", branch="main", dry_run=True)
+    text = format_plan_text(plan, decision)
+    assert "Experiments module" in text or "experiments" in text.lower()
