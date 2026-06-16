@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 import click
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from .api.ozon_client import create_client
@@ -902,6 +903,103 @@ def skills_reload_cmd() -> None:
 
     loaded_skills = reload_skills()
     console.print(f"[green]Reloaded {len(loaded_skills)} skills[/]")
+
+
+@main.group()
+def api() -> None:
+    """Inspect Ozon API Swagger endpoints."""
+
+
+@api.command("endpoints")
+def api_endpoints_cmd() -> None:
+    """List endpoint categories."""
+    from .skills.ozon_api.swagger_models import EndpointCategory
+    from .skills.ozon_api.swagger_registry import count_endpoints_by_category
+
+    stats = count_endpoints_by_category()
+    table = Table(title="Ozon API Endpoint Categories")
+    table.add_column("Category")
+    table.add_column("Count")
+    for category in EndpointCategory:
+        if category.value == "Other":
+            continue
+        table.add_row(category.value, str(stats.get(category, 0)))
+    console.print(table)
+
+
+@api.command("search")
+@click.argument("query")
+def api_search_cmd(query: str) -> None:
+    """Search endpoints by query."""
+    from .skills.ozon_api.swagger_registry import search_endpoints
+
+    matches = search_endpoints(query)
+    if not matches:
+        console.print(f"[yellow]No endpoints found for '{query}'[/]")
+        return
+
+    table = Table(title=f"Ozon API Search: {query}")
+    table.add_column("Method")
+    table.add_column("Path")
+    table.add_column("Name")
+    table.add_column("Category")
+    for endpoint in matches[:25]:
+        table.add_row(endpoint.method, endpoint.path, endpoint.name, endpoint.category.value)
+    console.print(table)
+
+
+@api.command("show")
+@click.argument("name")
+def api_show_cmd(name: str) -> None:
+    """Show endpoint details."""
+    from .skills.ozon_api.swagger_models import EndpointNotFoundError
+    from .skills.ozon_api.swagger_registry import get_endpoint
+
+    try:
+        endpoint = get_endpoint(name)
+    except EndpointNotFoundError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    table = Table(title=f"Ozon API Endpoint: {endpoint.name}")
+    table.add_column("Field")
+    table.add_column("Value")
+    table.add_row("Method", endpoint.method)
+    table.add_row("Path", escape(endpoint.path))
+    table.add_row("Category", endpoint.category.value)
+    table.add_row("Summary", endpoint.summary or "-")
+    table.add_row("Description", endpoint.description or "-")
+    table.add_row("Tags", escape(", ".join(endpoint.tags)) or "-")
+    table.add_row(
+        "Request schema keys",
+        escape(", ".join(sorted(endpoint.request_schema.keys()))) or "-",
+    )
+    table.add_row(
+        "Response schema keys",
+        escape(", ".join(sorted(endpoint.response_schema.keys()))) or "-",
+    )
+    console.print(table)
+
+
+@api.command("stats")
+def api_stats_cmd() -> None:
+    """Show Swagger stats."""
+    from .skills.ozon_api.swagger_loader import get_swagger_version, load_swagger
+    from .skills.ozon_api.swagger_models import EndpointCategory
+    from .skills.ozon_api.swagger_registry import count_endpoints, count_endpoints_by_category
+
+    document = load_swagger()
+    category_counts = count_endpoints_by_category()
+    table = Table(title="Ozon API Swagger Stats")
+    table.add_column("Metric")
+    table.add_column("Value")
+    table.add_row("Title", document.title or "-")
+    table.add_row("Swagger version", get_swagger_version())
+    table.add_row("Total endpoints", str(count_endpoints()))
+    for category in EndpointCategory:
+        if category.value == "Other":
+            continue
+        table.add_row(category.value, str(category_counts.get(category, 0)))
+    console.print(table)
 
 
 @main.group()
