@@ -1200,6 +1200,88 @@ def mcp_stats_cmd() -> None:
 
 
 @main.group()
+def research() -> None:
+    """Inspect marketplace research foundation."""
+
+
+@research.command("sources")
+def research_sources_cmd() -> None:
+    """List marketplace research sources."""
+    from .research.source_registry import list_sources
+
+    table = Table(title="Marketplace Research Sources")
+    table.add_column("Name")
+    table.add_column("Type")
+    table.add_column("Status")
+    table.add_column("Network")
+    table.add_column("Description")
+    for source in list_sources():
+        table.add_row(
+            source.name,
+            source.source_type.value,
+            source.status.value,
+            "yes" if source.requires_network else "no",
+            source.description,
+        )
+    console.print(table)
+
+
+@research.command("sample")
+def research_sample_cmd() -> None:
+    """Show deterministic marketplace research output shape."""
+    from .research.engine import generate_marketplace_research_report
+    from .research.models import ResearchObservation
+
+    report = generate_marketplace_research_report(
+        query="sample",
+        own_observations=[
+            ResearchObservation(
+                sku="sample-sku",
+                product_name="Sample product",
+                seller_name="own",
+                price=1200,
+                rating=4.2,
+                review_count=12,
+                available=True,
+            )
+        ],
+        competitor_observations=[
+            ResearchObservation(
+                sku="sample-sku",
+                product_name="Competitor product",
+                seller_name="competitor",
+                source_url="https://example.test/product",
+                price=1000,
+                rating=4.7,
+                review_count=60,
+                available=True,
+            )
+        ],
+    )
+    table = Table(title="Marketplace Research Sample")
+    table.add_column("Metric")
+    table.add_column("Value")
+    for key, value in report.summary.items():
+        table.add_row(str(key), str(value))
+    console.print(table)
+
+    insights_table = Table(title="Sample Insights")
+    insights_table.add_column("SKU")
+    insights_table.add_column("Type")
+    insights_table.add_column("Severity")
+    insights_table.add_column("Reason")
+    for insight in report.insights:
+        insights_table.add_row(
+            insight.sku,
+            insight.insight_type.value,
+            insight.severity,
+            insight.reason,
+        )
+    console.print(insights_table)
+    console.print("[yellow]External collection disabled: foundation only.[/]")
+
+
+@main.group()
 def experiments() -> None:
     """Manage A/B experiments."""
 
