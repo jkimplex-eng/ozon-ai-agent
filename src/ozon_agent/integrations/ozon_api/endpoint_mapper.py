@@ -15,3 +15,13 @@ def build_endpoint_map() -> dict[str, dict[str, Any]]:
             "tags": list(endpoint.tags),
         }
     return endpoint_map
+
+
+def build_category_map() -> dict[str, list[str]]:
+    category_map: dict[str, list[str]] = {}
+    for endpoint in list_endpoints():
+        category_name = endpoint.category.value.lower()
+        category_map.setdefault(category_name, []).append(endpoint.name)
+    for endpoint_names in category_map.values():
+        endpoint_names.sort()
+    return dict(sorted(category_map.items()))

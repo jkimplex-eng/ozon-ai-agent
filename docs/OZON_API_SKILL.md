@@ -89,4 +89,14 @@ The integration stubs live in:
 - [C:\Users\user\Documents\Codex\2026-05-13\github\ozon-ai-agent\src\ozon_agent\integrations\ozon_api\client_generator.py](C:\Users\user\Documents\Codex\2026-05-13\github\ozon-ai-agent\src\ozon_agent\integrations\ozon_api\client_generator.py)
 - [C:\Users\user\Documents\Codex\2026-05-13\github\ozon-ai-agent\src\ozon_agent\integrations\ozon_api\endpoint_mapper.py](C:\Users\user\Documents\Codex\2026-05-13\github\ozon-ai-agent\src\ozon_agent\integrations\ozon_api\endpoint_mapper.py)
 
+Supported read-only generation helpers:
+
+- `generate_client_blueprint()`
+- `build_endpoint_map()`
+- `build_category_map()`
+
+Additional CLI command:
+
+- `ozon-agent api client`
+
 No real HTTP execution is implemented at this stage.

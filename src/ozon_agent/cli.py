@@ -1002,6 +1002,35 @@ def api_stats_cmd() -> None:
     console.print(table)
 
 
+@api.command("client")
+def api_client_cmd() -> None:
+    """Show read-only client generation blueprint."""
+    from .integrations.ozon_api.client_generator import generate_client_blueprint
+
+    blueprint = generate_client_blueprint()
+    table = Table(title="Ozon API Client Blueprint")
+    table.add_column("Field")
+    table.add_column("Value")
+    table.add_row("Client name", str(blueprint["client_name"]))
+    table.add_row("Source", str(blueprint["source"]))
+    table.add_row("Swagger title", str(blueprint["swagger_title"]))
+    table.add_row("Swagger version", str(blueprint["swagger_version"]))
+    table.add_row("Request execution", str(blueprint["request_execution"]))
+    table.add_row("Endpoint count", str(blueprint["endpoint_count"]))
+    table.add_row("Module count", str(blueprint["module_count"]))
+    console.print(table)
+
+    modules_table = Table(title="Generated Client Modules")
+    modules_table.add_column("Module")
+    modules_table.add_column("Endpoints")
+    modules_table.add_column("Sample methods")
+    for module in blueprint["modules"]:
+        methods = [str(item["name"]) for item in module["methods"][:3]]
+        sample = ", ".join(methods) if methods else "-"
+        modules_table.add_row(str(module["name"]), str(module["endpoint_count"]), sample)
+    console.print(modules_table)
+
+
 @main.group()
 def experiments() -> None:
     """Manage A/B experiments."""
