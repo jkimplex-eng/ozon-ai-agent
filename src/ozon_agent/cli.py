@@ -1281,6 +1281,54 @@ def research_sample_cmd() -> None:
     console.print("[yellow]External collection disabled: foundation only.[/]")
 
 
+@research.command("ingest")
+@click.argument("path", type=click.Path(exists=True, dir_okay=False))
+@click.option("--query", default=None, help="Research query label")
+@click.option("--source", "source_name", default="manual", help="Registered source name")
+def research_ingest_cmd(path: str, query: str | None, source_name: str) -> None:
+    """Validate and ingest a local competitor snapshot file."""
+    from .research.snapshot_ingestion import SnapshotIngestionError, ingest_competitor_snapshot
+
+    try:
+        result = ingest_competitor_snapshot(path, query=query, source_name=source_name)
+    except SnapshotIngestionError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    table = Table(title="Competitor Snapshot Ingestion")
+    table.add_column("Metric")
+    table.add_column("Value")
+    table.add_row("Query", result.snapshot.query)
+    table.add_row("Source", result.snapshot.source_name)
+    table.add_row("Raw rows", str(result.raw_rows))
+    table.add_row("Ingested rows", str(result.ingested_rows))
+    table.add_row("Skipped rows", str(result.skipped_rows))
+    table.add_row("Warnings", str(len(result.warnings)))
+    console.print(table)
+
+    if result.snapshot.observations:
+        preview = Table(title="Observation Preview")
+        preview.add_column("SKU")
+        preview.add_column("Product")
+        preview.add_column("Seller")
+        preview.add_column("Price")
+        preview.add_column("Rating")
+        preview.add_column("Reviews")
+        for observation in result.snapshot.observations[:10]:
+            preview.add_row(
+                observation.sku,
+                observation.product_name or "-",
+                observation.seller_name or "-",
+                str(observation.price) if observation.price is not None else "-",
+                str(observation.rating) if observation.rating is not None else "-",
+                str(observation.review_count) if observation.review_count is not None else "-",
+            )
+        console.print(preview)
+
+    for warning in result.warnings[:10]:
+        console.print(f"[yellow]{escape(warning)}[/]")
+    console.print("[yellow]External collection disabled: local snapshot ingestion only.[/]")
+
+
 @main.group()
 def experiments() -> None:
     """Manage A/B experiments."""

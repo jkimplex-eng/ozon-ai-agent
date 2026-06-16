@@ -26,9 +26,22 @@ passed to pure Python functions.
 ```bash
 ozon-agent research sources
 ozon-agent research sample
+ozon-agent research ingest data/raw/competitors.json --query "sj11"
 ```
 
 `research sample` runs a deterministic in-memory example and demonstrates output shape.
+
+`research ingest` validates a local JSON or CSV snapshot and converts rows into
+`ResearchObservation` objects. It does not fetch pages and does not persist or mutate Ozon data.
+
+Supported row fields include:
+
+- `sku`, `offer_id`, `offerId`, `product_id`, `productId`
+- `product_name`, `productName`, `name`, `title`
+- `seller_name`, `sellerName`, `seller`
+- `source_url`, `sourceUrl`, `url`
+- `observed_at`, `observedAt`
+- `price`, `rating`, `review_count`, `reviewCount`, `position`, `rank`, `available`
 
 ## Future Integrations
 

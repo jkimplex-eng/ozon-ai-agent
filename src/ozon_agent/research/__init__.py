@@ -11,6 +11,11 @@ from ozon_agent.research.models import (
     ResearchObservation,
     ResearchSnapshot,
     ResearchSourceStatus,
+    SnapshotIngestionResult,
+)
+from ozon_agent.research.snapshot_ingestion import (
+    SnapshotIngestionError,
+    ingest_competitor_snapshot,
 )
 
 __all__ = [
@@ -23,5 +28,8 @@ __all__ = [
     "ResearchObservation",
     "ResearchSnapshot",
     "ResearchSourceStatus",
+    "SnapshotIngestionError",
+    "SnapshotIngestionResult",
     "generate_marketplace_research_report",
+    "ingest_competitor_snapshot",
 ]

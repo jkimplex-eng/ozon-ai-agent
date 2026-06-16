@@ -72,6 +72,15 @@ class ResearchSnapshot:
 
 
 @dataclass(frozen=True)
+class SnapshotIngestionResult:
+    snapshot: ResearchSnapshot
+    raw_rows: int
+    ingested_rows: int
+    skipped_rows: int
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class MarketplaceComparison:
     sku: str
     product_name: str
