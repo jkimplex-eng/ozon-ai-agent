@@ -102,3 +102,25 @@ This foundation prepares market data for:
 - MCP research tools;
 - Decision Engine feature enrichment;
 - pricing and content experiment planning.
+
+## Firecrawl Adapter
+
+Firecrawl ingestion uses the hosted scrape endpoint and stores structured extraction results as
+normal market snapshots.
+
+```bash
+set FIRECRAWL_API_KEY=fc-...
+ozon-agent research firecrawl ingest https://example.com/product --query "sj11"
+```
+
+The adapter calls Firecrawl's `POST /v2/scrape` endpoint with markdown plus structured JSON output.
+The JSON schema asks for competitor observations with SKU or offer id, product name, seller, URL,
+price, rating, review count, position, and availability.
+
+The CLI saves the result into the same snapshot store used by local JSON/CSV ingestion.
+
+Safety notes:
+
+- API keys are read from environment variables, not CLI arguments.
+- Tests use mocked HTTP transport and do not call Firecrawl.
+- No Ozon API, Telegram, MCP execution, or marketplace mutation is performed.

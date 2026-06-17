@@ -27,6 +27,18 @@ def ingest_competitor_snapshot(
         raise SnapshotIngestionError(f"Snapshot file not found: {snapshot_path}")
 
     rows = _load_rows(snapshot_path)
+    return ingest_competitor_rows(
+        rows=rows,
+        query=query or snapshot_path.stem,
+        source_name=source_name,
+    )
+
+
+def ingest_competitor_rows(
+    rows: list[dict[str, Any]],
+    query: str,
+    source_name: str = "manual",
+) -> SnapshotIngestionResult:
     observations: list[ResearchObservation] = []
     warnings: list[str] = []
     for index, row in enumerate(rows, start=1):
@@ -36,7 +48,7 @@ def ingest_competitor_snapshot(
             warnings.append(f"row {index}: {exc}")
 
     snapshot = build_research_snapshot(
-        query=query or snapshot_path.stem,
+        query=query,
         observations=observations,
         source_name=source_name,
     )

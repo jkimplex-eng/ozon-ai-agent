@@ -1332,6 +1332,61 @@ def research_ingest_cmd(path: str, query: str | None, source_name: str) -> None:
     console.print("[yellow]External collection disabled: local snapshot ingestion only.[/]")
 
 
+@research.group("firecrawl")
+def research_firecrawl() -> None:
+    """Ingest marketplace snapshots through Firecrawl."""
+
+
+@research_firecrawl.command("ingest")
+@click.argument("url")
+@click.option("--query", required=True, help="Research query label")
+@click.option("--api-key-env", default="FIRECRAWL_API_KEY", help="Environment variable for API key")
+@click.option("--endpoint-url", default=None, help="Override Firecrawl scrape endpoint")
+@click.option("--timeout", "timeout_seconds", default=60.0, help="HTTP timeout in seconds")
+@click.option("--zero-data-retention", is_flag=True, help="Request Firecrawl zero data retention")
+def research_firecrawl_ingest_cmd(
+    url: str,
+    query: str,
+    api_key_env: str,
+    endpoint_url: str | None,
+    timeout_seconds: float,
+    zero_data_retention: bool,
+) -> None:
+    """Fetch a Firecrawl scrape and save it as a market snapshot."""
+    from .research.adapters.firecrawl import (
+        FirecrawlConfig,
+        FirecrawlIngestionError,
+        ingest_firecrawl_snapshot,
+    )
+    from .research.knowledge.snapshot_store import save_snapshot
+
+    config = FirecrawlConfig(
+        api_key_env=api_key_env,
+        endpoint_url=endpoint_url or FirecrawlConfig().endpoint_url,
+        timeout_seconds=timeout_seconds,
+        zero_data_retention=zero_data_retention,
+    )
+    try:
+        result = ingest_firecrawl_snapshot(url=url, query=query, config=config)
+    except FirecrawlIngestionError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    saved_snapshot = save_snapshot(result.ingestion.snapshot)
+    table = Table(title="Firecrawl Snapshot Ingestion")
+    table.add_column("Metric")
+    table.add_column("Value")
+    table.add_row("Snapshot ID", saved_snapshot.id)
+    table.add_row("URL", escape(result.url))
+    table.add_row("Query", result.ingestion.snapshot.query)
+    table.add_row("Raw rows", str(result.ingestion.raw_rows))
+    table.add_row("Ingested rows", str(result.ingestion.ingested_rows))
+    table.add_row("Skipped rows", str(result.ingestion.skipped_rows))
+    table.add_row("Warnings", str(len(result.ingestion.warnings)))
+    if result.warning:
+        table.add_row("Firecrawl warning", result.warning)
+    console.print(table)
+
+
 @research.command("snapshots")
 def research_snapshots_cmd() -> None:
     """List stored market snapshots."""
