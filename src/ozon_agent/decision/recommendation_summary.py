@@ -52,6 +52,23 @@ def format_recommendation_text(rec: Recommendation) -> str:
                 f"  - {match.get('experiment_id')}: "
                 f"score={match.get('score')} result={match.get('result')}"
             )
+    if rec.memory_signals:
+        lines.append("Recommendation memory:")
+        for signal in rec.memory_signals:
+            lines.append(f"  - {signal.get('message')}")
+        lines.append(
+            f"  - historical_action_success_rate: "
+            f"{rec.historical_action_success_rate:.0%}"
+        )
+        if rec.memory_confidence is not None:
+            lines.append(f"  - memory_confidence: {rec.memory_confidence:.2f}")
+    if rec.similar_recommendations:
+        lines.append("Similar recommendations:")
+        for match in rec.similar_recommendations:
+            lines.append(
+                f"  - {match.get('record_id')}: "
+                f"score={match.get('score')} result={match.get('result')}"
+            )
     return "\n".join(lines)
 
 
@@ -94,4 +111,9 @@ def recommendation_to_dict(rec: Recommendation) -> dict[str, Any]:
         "historical_success_rate": rec.historical_success_rate,
         "learning_insights": rec.learning_insights,
         "recommended_confidence": rec.recommended_confidence,
+        "memory_signals": rec.memory_signals,
+        "similar_recommendations": rec.similar_recommendations,
+        "historical_action_success_rate": rec.historical_action_success_rate,
+        "memory_insights": rec.memory_insights,
+        "memory_confidence": rec.memory_confidence,
     }

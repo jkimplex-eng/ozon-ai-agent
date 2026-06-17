@@ -136,6 +136,11 @@ class Recommendation:
     historical_success_rate: float = 0.0
     learning_insights: list[dict[str, Any]] = field(default_factory=list)
     recommended_confidence: float | None = None
+    memory_signals: list[dict[str, Any]] = field(default_factory=list)
+    similar_recommendations: list[dict[str, Any]] = field(default_factory=list)
+    historical_action_success_rate: float = 0.0
+    memory_insights: list[dict[str, Any]] = field(default_factory=list)
+    memory_confidence: float | None = None
 
 
 def utc_now_iso() -> str:

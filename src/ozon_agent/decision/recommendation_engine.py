@@ -28,6 +28,9 @@ def generate_recommendation(
     from ozon_agent.learning.learning_engine import generate_recommendation_support
 
     learning_context = generate_recommendation_support(feature, opportunity, action)
+    from ozon_agent.memory.engine import generate_memory_support
+
+    memory_context = generate_memory_support(feature, opportunity, action)
     return Recommendation(
         sku=feature.sku,
         action=action,
@@ -39,6 +42,7 @@ def generate_recommendation(
             context,
             knowledge_context,
             learning_context,
+            memory_context,
         ),
         supporting_metrics={
             **opportunity.metrics,
@@ -70,6 +74,13 @@ def generate_recommendation(
         historical_success_rate=float(learning_context["historical_success_rate"]),
         learning_insights=learning_context["learning_insights"],
         recommended_confidence=float(learning_context["recommended_confidence"]),
+        memory_signals=memory_context["memory_signals"],
+        similar_recommendations=memory_context["similar_recommendations"],
+        historical_action_success_rate=float(
+            memory_context["historical_action_success_rate"]
+        ),
+        memory_insights=memory_context["memory_insights"],
+        memory_confidence=float(memory_context["memory_confidence"]),
     )
 
 
@@ -166,6 +177,7 @@ def _enriched_reason(
     market_context: MarketContext,
     knowledge_context: dict[str, object],
     learning_context: dict[str, object],
+    memory_context: dict[str, object],
 ) -> str:
     market_reasons: list[str] = []
     if market_context.price_pressure == "HIGH":
@@ -190,6 +202,11 @@ def _enriched_reason(
         signal = learning_signals[0]
         if isinstance(signal, dict):
             market_reasons.append(str(signal.get("message", "experiment learning available")))
+    memory_signals = memory_context.get("memory_signals", [])
+    if isinstance(memory_signals, list) and memory_signals:
+        signal = memory_signals[0]
+        if isinstance(signal, dict):
+            market_reasons.append(str(signal.get("message", "recommendation memory available")))
     if not market_reasons:
         return reason
     return f"{reason}; market context: {', '.join(market_reasons)}"

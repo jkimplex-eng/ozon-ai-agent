@@ -567,6 +567,68 @@ def recommendations_explain_cmd(sku: str | None, top: int) -> None:
         console.print("")
 
 
+@recommendations.group("memory")
+def recommendations_memory() -> None:
+    """Inspect autonomous recommendation memory."""
+
+
+@recommendations_memory.command("stats")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output JSON")
+def recommendations_memory_stats(as_json: bool) -> None:
+    """Show recommendation memory statistics."""
+    import json as json_mod
+
+    from .memory.report_builder import build_memory_report, memory_stats_to_dict
+    from .memory.statistics import build_memory_statistics
+
+    stats = build_memory_statistics()
+    if as_json:
+        console.print(json_mod.dumps(memory_stats_to_dict(stats), ensure_ascii=False, indent=2))
+    else:
+        console.print(build_memory_report(stats))
+
+
+@recommendations_memory.command("search")
+@click.argument("query")
+def recommendations_memory_search(query: str) -> None:
+    """Search stored recommendation memory records."""
+    from .memory.repository import search_memory_records
+
+    rows = search_memory_records(query)
+    table = Table(title=f"Recommendation Memory Search: {query}")
+    table.add_column("ID")
+    table.add_column("SKU")
+    table.add_column("Action")
+    table.add_column("Result")
+    table.add_column("Success")
+    for row in rows[:50]:
+        table.add_row(
+            row.id,
+            row.sku,
+            row.action.value,
+            row.result.value,
+            f"{row.success_score:.2f}",
+        )
+    console.print(table)
+
+
+@recommendations_memory.command("insights")
+def recommendations_memory_insights() -> None:
+    """Show recommendation memory insights."""
+    from .memory.report_builder import build_memory_insights_report
+
+    console.print(build_memory_insights_report())
+
+
+@recommendations_memory.command("refresh")
+def recommendations_memory_refresh() -> None:
+    """Refresh recommendation memory insights from stored records."""
+    from .memory.engine import refresh_memory_insights
+
+    insights = refresh_memory_insights()
+    console.print(f"[green]Refreshed {len(insights)} memory insights.[/]")
+
+
 def _generate_current_recommendations(sku: str | None, top: int) -> list["Recommendation"]:
     import pandas as pd
 
