@@ -38,6 +38,20 @@ def format_recommendation_text(rec: Recommendation) -> str:
         lines.append("Knowledge rules:")
         for rule in rec.knowledge_rules:
             lines.append(f"  - {rule.get('domain')}: {rule.get('title')}")
+    if rec.learning_signals:
+        lines.append("Learning:")
+        for signal in rec.learning_signals:
+            lines.append(f"  - {signal.get('message')}")
+        lines.append(f"  - historical_success_rate: {rec.historical_success_rate:.0%}")
+        if rec.recommended_confidence is not None:
+            lines.append(f"  - recommended_confidence: {rec.recommended_confidence:.2f}")
+    if rec.similar_experiments:
+        lines.append("Similar experiments:")
+        for match in rec.similar_experiments:
+            lines.append(
+                f"  - {match.get('experiment_id')}: "
+                f"score={match.get('score')} result={match.get('result')}"
+            )
     return "\n".join(lines)
 
 
@@ -75,4 +89,9 @@ def recommendation_to_dict(rec: Recommendation) -> dict[str, Any]:
         "knowledge_signals": rec.knowledge_signals,
         "knowledge_rules": rec.knowledge_rules,
         "knowledge_sources": rec.knowledge_sources,
+        "learning_signals": rec.learning_signals,
+        "similar_experiments": rec.similar_experiments,
+        "historical_success_rate": rec.historical_success_rate,
+        "learning_insights": rec.learning_insights,
+        "recommended_confidence": rec.recommended_confidence,
     }

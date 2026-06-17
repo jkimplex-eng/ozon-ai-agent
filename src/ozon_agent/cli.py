@@ -1989,6 +1989,93 @@ def experiments_report(exp_id: str, as_json: bool) -> None:
         console.print(format_experiment_report(exp))
 
 
+@experiments.command("hypotheses")
+@click.option("--query", default="", help="Search hypotheses")
+def experiments_hypotheses(query: str) -> None:
+    """List file-based learning hypotheses."""
+    from .learning.hypothesis_engine import list_hypotheses, search_hypotheses
+
+    hypotheses = search_hypotheses(query) if query else list_hypotheses()
+    table = Table(title="Experiment Hypotheses")
+    table.add_column("ID")
+    table.add_column("SKU")
+    table.add_column("Type")
+    table.add_column("Statement")
+    for hypothesis in hypotheses:
+        table.add_row(
+            hypothesis.id,
+            hypothesis.sku,
+            hypothesis.experiment_type.value,
+            hypothesis.statement,
+        )
+    console.print(table)
+
+
+@experiments.command("similar")
+@click.argument("exp_id")
+@click.option("--limit", default=10, help="Max similar experiments")
+def experiments_similar(exp_id: str, limit: int) -> None:
+    """Find similar file-based learning experiments."""
+    from .learning.similarity import find_similar_experiments_by_id
+
+    matches = find_similar_experiments_by_id(exp_id, limit=limit)
+    table = Table(title=f"Similar Experiments: {exp_id}")
+    table.add_column("Experiment")
+    table.add_column("Score")
+    table.add_column("Result")
+    table.add_column("Reasons")
+    for match in matches:
+        table.add_row(
+            match.experiment_id,
+            f"{match.score:.2f}",
+            match.result.value,
+            ", ".join(match.reasons),
+        )
+    console.print(table)
+
+
+@experiments.command("insights")
+def experiments_insights() -> None:
+    """List stored experiment learning insights."""
+    from .learning.repository import list_json
+
+    rows = list_json("insights")
+    table = Table(title="Experiment Learning Insights")
+    table.add_column("ID")
+    table.add_column("Category")
+    table.add_column("Type")
+    table.add_column("Success")
+    table.add_column("Message")
+    for row in rows:
+        table.add_row(
+            str(row.get("id", "")),
+            str(row.get("category", "")),
+            str(row.get("experiment_type", "")),
+            f"{float(row.get('success_rate', 0.0)):.0%}",
+            str(row.get("message", "")),
+        )
+    console.print(table)
+
+
+@experiments.command("stats")
+def experiments_stats() -> None:
+    """Show file-based experiment learning statistics."""
+    from .learning.experiment_store import list_experiments as list_learning_experiments
+    from .learning.statistics import build_experiment_statistics
+
+    stats = build_experiment_statistics(list_learning_experiments())
+    console.print("[bold]Experiment Learning Statistics[/]")
+    console.print(f"Total experiments: {stats.total_experiments}")
+    console.print(f"Success rate: {stats.success_rate:.0%}")
+    if stats.by_experiment_type:
+        console.print("By experiment type:")
+        for exp_type, payload in stats.by_experiment_type.items():
+            console.print(
+                f"  - {exp_type}: {payload['count']} "
+                f"experiments, success {float(payload['success_rate']):.0%}"
+            )
+
+
 @experiments.command("create-from-recommendation")
 @click.argument("rec_id")
 def experiments_create_from_recommendation(rec_id: str) -> None:

@@ -25,13 +25,21 @@ def generate_recommendation(
     confidence = score_confidence(feature, opportunity)
     risk = score_risk(feature, opportunity, action)
     knowledge_context = build_knowledge_context(feature, opportunity, context)
+    from ozon_agent.learning.learning_engine import generate_recommendation_support
+
+    learning_context = generate_recommendation_support(feature, opportunity, action)
     return Recommendation(
         sku=feature.sku,
         action=action,
         expected_effect=_expected_effect(feature, opportunity, action, context),
         confidence=confidence,
         risk=risk,
-        reason=_enriched_reason(opportunity.reason, context, knowledge_context),
+        reason=_enriched_reason(
+            opportunity.reason,
+            context,
+            knowledge_context,
+            learning_context,
+        ),
         supporting_metrics={
             **opportunity.metrics,
             "price": feature.price,
@@ -57,6 +65,11 @@ def generate_recommendation(
         knowledge_signals=knowledge_context["knowledge_signals"],
         knowledge_rules=knowledge_context["knowledge_rules"],
         knowledge_sources=knowledge_context["knowledge_sources"],
+        learning_signals=learning_context["learning_signals"],
+        similar_experiments=learning_context["similar_experiments"],
+        historical_success_rate=float(learning_context["historical_success_rate"]),
+        learning_insights=learning_context["learning_insights"],
+        recommended_confidence=float(learning_context["recommended_confidence"]),
     )
 
 
@@ -152,6 +165,7 @@ def _enriched_reason(
     reason: str,
     market_context: MarketContext,
     knowledge_context: dict[str, object],
+    learning_context: dict[str, object],
 ) -> str:
     market_reasons: list[str] = []
     if market_context.price_pressure == "HIGH":
@@ -171,6 +185,11 @@ def _enriched_reason(
         ]
         if rule_titles:
             market_reasons.append(f"knowledge rules: {', '.join(rule_titles)}")
+    learning_signals = learning_context.get("learning_signals", [])
+    if isinstance(learning_signals, list) and learning_signals:
+        signal = learning_signals[0]
+        if isinstance(signal, dict):
+            market_reasons.append(str(signal.get("message", "experiment learning available")))
     if not market_reasons:
         return reason
     return f"{reason}; market context: {', '.join(market_reasons)}"

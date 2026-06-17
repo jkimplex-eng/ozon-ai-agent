@@ -131,6 +131,11 @@ class Recommendation:
     knowledge_signals: list[dict[str, Any]] = field(default_factory=list)
     knowledge_rules: list[dict[str, Any]] = field(default_factory=list)
     knowledge_sources: list[dict[str, Any]] = field(default_factory=list)
+    learning_signals: list[dict[str, Any]] = field(default_factory=list)
+    similar_experiments: list[dict[str, Any]] = field(default_factory=list)
+    historical_success_rate: float = 0.0
+    learning_insights: list[dict[str, Any]] = field(default_factory=list)
+    recommended_confidence: float | None = None
 
 
 def utc_now_iso() -> str:
