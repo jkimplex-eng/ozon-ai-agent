@@ -81,6 +81,84 @@ def sync_finance_cmd(date_from: datetime, date_to: datetime) -> None:
         client.close()
 
 
+@main.group()
+def ingest() -> None:
+    """Ingest external data into local agent storage."""
+
+
+@ingest.group("ozon")
+def ingest_ozon() -> None:
+    """Live read-only Ozon Seller API ingestion."""
+
+
+@ingest_ozon.command("datasets")
+def ingest_ozon_datasets_cmd() -> None:
+    """List supported live Ozon ingestion datasets."""
+    from .ingestion.endpoints import READ_ONLY_ENDPOINTS
+
+    table = Table(title="Live Ozon Ingestion Datasets")
+    table.add_column("Dataset")
+    table.add_column("Endpoint")
+    table.add_column("Description")
+    for dataset, endpoint in READ_ONLY_ENDPOINTS.items():
+        table.add_row(dataset.value, endpoint.path, endpoint.description)
+    console.print(table)
+
+
+@ingest_ozon.command("run")
+@click.argument("dataset")
+@click.option("--date-from", default=None, help="Date from, YYYY-MM-DD")
+@click.option("--date-to", default=None, help="Date to, YYYY-MM-DD")
+@click.option("--limit", default=1000, help="Page size limit")
+@click.option("--dry-run", is_flag=True, help="Build request without calling Ozon")
+@click.option("--no-save-raw", is_flag=True, help="Do not save raw payload")
+@click.option("--no-save-normalized", is_flag=True, help="Do not save normalized rows")
+def ingest_ozon_run_cmd(
+    dataset: str,
+    date_from: str | None,
+    date_to: str | None,
+    limit: int,
+    dry_run: bool,
+    no_save_raw: bool,
+    no_save_normalized: bool,
+) -> None:
+    """Run one live read-only Ozon ingestion request."""
+    from .ingestion.client import LiveOzonCredentialsError
+    from .ingestion.models import LiveOzonDataset, LiveOzonIngestionRequest
+    from .ingestion.service import ingest_live_ozon_dataset
+
+    try:
+        dataset_value = LiveOzonDataset(dataset)
+        result = ingest_live_ozon_dataset(
+            LiveOzonIngestionRequest(
+                dataset=dataset_value,
+                date_from=date_from,
+                date_to=date_to,
+                limit=limit,
+                dry_run=dry_run,
+                save_raw=not no_save_raw,
+                save_normalized=not no_save_normalized,
+            )
+        )
+    except (ValueError, LiveOzonCredentialsError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    table = Table(title="Live Ozon Ingestion")
+    table.add_column("Metric")
+    table.add_column("Value")
+    table.add_row("Dataset", result.dataset.value)
+    table.add_row("Endpoint", result.endpoint)
+    table.add_row("Dry run", str(result.dry_run))
+    table.add_row("Raw rows", str(result.raw_rows))
+    table.add_row("Normalized rows", str(result.normalized_rows))
+    table.add_row("Raw path", str(result.raw_path or ""))
+    table.add_row("Normalized path", str(result.normalized_path or ""))
+    table.add_row("Warnings", str(len(result.warnings)))
+    console.print(table)
+    for warning in result.warnings:
+        console.print(f"[yellow]{escape(warning)}[/]")
+
+
 @main.command()
 def status() -> None:
     """Show ETL sync status."""
