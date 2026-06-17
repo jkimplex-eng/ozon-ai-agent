@@ -103,7 +103,8 @@ def test_ingest_rejects_unsupported_file(tmp_path: Path) -> None:
         raise AssertionError("Expected SnapshotIngestionError")
 
 
-def test_research_ingest_cli(tmp_path: Path) -> None:
+def test_research_ingest_cli(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OZON_AGENT_MARKET_KNOWLEDGE_DIR", str(tmp_path / "knowledge"))
     path = tmp_path / "competitors.json"
     path.write_text(json.dumps([{"sku": "SKU-3", "price": 500}]), encoding="utf-8")
 

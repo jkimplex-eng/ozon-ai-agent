@@ -1287,16 +1287,19 @@ def research_sample_cmd() -> None:
 @click.option("--source", "source_name", default="manual", help="Registered source name")
 def research_ingest_cmd(path: str, query: str | None, source_name: str) -> None:
     """Validate and ingest a local competitor snapshot file."""
+    from .research.knowledge.snapshot_store import save_snapshot
     from .research.snapshot_ingestion import SnapshotIngestionError, ingest_competitor_snapshot
 
     try:
         result = ingest_competitor_snapshot(path, query=query, source_name=source_name)
     except SnapshotIngestionError as exc:
         raise click.ClickException(str(exc)) from exc
+    saved_snapshot = save_snapshot(result.snapshot)
 
     table = Table(title="Competitor Snapshot Ingestion")
     table.add_column("Metric")
     table.add_column("Value")
+    table.add_row("Snapshot ID", saved_snapshot.id)
     table.add_row("Query", result.snapshot.query)
     table.add_row("Source", result.snapshot.source_name)
     table.add_row("Raw rows", str(result.raw_rows))
@@ -1327,6 +1330,127 @@ def research_ingest_cmd(path: str, query: str | None, source_name: str) -> None:
     for warning in result.warnings[:10]:
         console.print(f"[yellow]{escape(warning)}[/]")
     console.print("[yellow]External collection disabled: local snapshot ingestion only.[/]")
+
+
+@research.command("snapshots")
+def research_snapshots_cmd() -> None:
+    """List stored market snapshots."""
+    from .research.knowledge.snapshot_store import list_snapshots
+
+    snapshots = list_snapshots()
+    table = Table(title="Market Knowledge Snapshots")
+    table.add_column("ID")
+    table.add_column("Query")
+    table.add_column("Source")
+    table.add_column("Captured")
+    table.add_column("Rows")
+    for snapshot in snapshots:
+        table.add_row(
+            snapshot.id,
+            snapshot.query or "-",
+            snapshot.source_name,
+            snapshot.captured_at.isoformat(),
+            str(snapshot.observation_count),
+        )
+    console.print(table)
+
+
+@research.command("snapshot")
+@click.argument("snapshot_id")
+def research_snapshot_cmd(snapshot_id: str) -> None:
+    """Show one stored market snapshot."""
+    from .research.knowledge.snapshot_store import load_snapshot
+
+    snapshot = load_snapshot(snapshot_id)
+    if snapshot is None:
+        raise click.ClickException(f"Snapshot not found: {snapshot_id}")
+
+    table = Table(title=f"Market Snapshot: {snapshot.id}")
+    table.add_column("Field")
+    table.add_column("Value")
+    table.add_row("Query", snapshot.query or "-")
+    table.add_row("Source", snapshot.source_name)
+    table.add_row("Captured", snapshot.captured_at.isoformat())
+    table.add_row("Rows", str(snapshot.observation_count))
+    console.print(table)
+
+    preview = Table(title="Observation Preview")
+    preview.add_column("SKU")
+    preview.add_column("Seller")
+    preview.add_column("Price")
+    preview.add_column("Rating")
+    preview.add_column("Reviews")
+    preview.add_column("Available")
+    for observation in snapshot.observations[:20]:
+        preview.add_row(
+            observation.sku,
+            observation.seller_name or "-",
+            str(observation.price) if observation.price is not None else "-",
+            str(observation.rating) if observation.rating is not None else "-",
+            str(observation.review_count) if observation.review_count is not None else "-",
+            str(observation.available) if observation.available is not None else "-",
+        )
+    console.print(preview)
+
+
+@research.command("compare")
+@click.argument("snapshot_a")
+@click.argument("snapshot_b")
+def research_compare_cmd(snapshot_a: str, snapshot_b: str) -> None:
+    """Compare two stored market snapshots and save insights."""
+    from .research.knowledge.history import compare_snapshots, detect_trends
+    from .research.knowledge.insight_store import save_insights
+    from .research.knowledge.snapshot_store import load_snapshot
+
+    previous = load_snapshot(snapshot_a)
+    current = load_snapshot(snapshot_b)
+    if previous is None:
+        raise click.ClickException(f"Snapshot not found: {snapshot_a}")
+    if current is None:
+        raise click.ClickException(f"Snapshot not found: {snapshot_b}")
+
+    insights = save_insights(compare_snapshots(previous, current))
+    trends = detect_trends([previous, current])
+    table = Table(title="Market Snapshot Comparison")
+    table.add_column("Type")
+    table.add_column("SKU")
+    table.add_column("Severity")
+    table.add_column("Message")
+    for insight in insights[:50]:
+        table.add_row(insight.insight_type, insight.sku, insight.severity, insight.message)
+    console.print(table)
+
+    trend_table = Table(title="Detected Trends")
+    trend_table.add_column("SKU")
+    trend_table.add_column("Metric")
+    trend_table.add_column("Direction")
+    trend_table.add_column("Delta")
+    for trend in trends[:50]:
+        trend_table.add_row(trend.sku, trend.metric, trend.direction, f"{trend.delta:.2f}")
+    console.print(trend_table)
+
+
+@research.command("insights")
+def research_insights_cmd() -> None:
+    """List stored market insights."""
+    from .research.knowledge.insight_store import list_insights
+
+    insights = list_insights()
+    table = Table(title="Market Knowledge Insights")
+    table.add_column("ID")
+    table.add_column("Type")
+    table.add_column("SKU")
+    table.add_column("Severity")
+    table.add_column("Message")
+    for insight in insights[:50]:
+        table.add_row(
+            insight.id,
+            insight.insight_type,
+            insight.sku,
+            insight.severity,
+            insight.message,
+        )
+    console.print(table)
 
 
 @main.group()
