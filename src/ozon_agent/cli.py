@@ -1485,8 +1485,27 @@ def research_compare_cmd(snapshot_a: str, snapshot_b: str) -> None:
     console.print(trend_table)
 
 
-@research.command("insights")
-def research_insights_cmd() -> None:
+@research.group("insights", invoke_without_command=True)
+@click.pass_context
+def research_insights_cmd(ctx: click.Context) -> None:
+    """Generate and inspect market insight engine output."""
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(research_insights_latest_cmd)
+
+
+@research_insights_cmd.command("generate")
+def research_insights_generate_cmd() -> None:
+    """Generate market insights from stored snapshots."""
+    from .research.insights.engine import generate_market_insights
+    from .research.insights.report_builder import build_market_report
+
+    insights = generate_market_insights()
+    console.print(build_market_report(insights))
+    console.print(f"[green]Generated and saved {len(insights)} market insights[/]")
+
+
+@research_insights_cmd.command("latest")
+def research_insights_latest_cmd() -> None:
     """List stored market insights."""
     from .research.knowledge.insight_store import list_insights
 
@@ -1504,6 +1523,52 @@ def research_insights_cmd() -> None:
             insight.sku,
             insight.severity,
             insight.message,
+        )
+    console.print(table)
+
+
+@research_insights_cmd.command("risks")
+def research_insights_risks_cmd() -> None:
+    """Show market risks inferred from current snapshots."""
+    from .research.insights.engine import detect_risks, generate_market_insights
+
+    risks = detect_risks(generate_market_insights(persist=False))
+    table = Table(title="Market Risks")
+    table.add_column("Risk")
+    table.add_column("SKU")
+    table.add_column("Priority")
+    table.add_column("Score")
+    table.add_column("Message")
+    for risk in risks[:50]:
+        table.add_row(
+            risk.risk_type,
+            risk.sku,
+            risk.priority.value,
+            f"{risk.score:.0f}",
+            risk.message,
+        )
+    console.print(table)
+
+
+@research_insights_cmd.command("opportunities")
+def research_insights_opportunities_cmd() -> None:
+    """Show market opportunities inferred from current snapshots."""
+    from .research.insights.engine import detect_opportunities, generate_market_insights
+
+    opportunities = detect_opportunities(generate_market_insights(persist=False))
+    table = Table(title="Market Opportunities")
+    table.add_column("Opportunity")
+    table.add_column("SKU")
+    table.add_column("Priority")
+    table.add_column("Score")
+    table.add_column("Message")
+    for opportunity in opportunities[:50]:
+        table.add_row(
+            opportunity.opportunity_type,
+            opportunity.sku,
+            opportunity.priority.value,
+            f"{opportunity.score:.0f}",
+            opportunity.message,
         )
     console.print(table)
 
