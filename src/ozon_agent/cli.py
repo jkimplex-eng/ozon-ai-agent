@@ -1,6 +1,7 @@
 """Ozon AI Agent CLI."""
 import logging
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 import click
 from rich.console import Console
@@ -9,6 +10,9 @@ from rich.table import Table
 
 from .api.ozon_client import create_client
 from .etl.sync import sync_all, sync_finance, sync_orders, sync_products
+
+if TYPE_CHECKING:
+    from .decision.models import Recommendation
 
 console = Console()
 
@@ -374,7 +378,7 @@ def rollback(target: str) -> None:
                 console.print(f"  Failed: {step['step']} — {step['stderr']}")
 
 
-@main.command()
+@main.group("recommendations", invoke_without_command=True)
 @click.option("--sku", default=None, help="Filter by SKU")
 @click.option("--top", default=20, help="Max recommendations to show")
 @click.option("--json", "as_json", is_flag=True, default=False, help="Output JSON")
@@ -382,11 +386,14 @@ def rollback(target: str) -> None:
 @click.option("--save-pending", is_flag=True, default=False, help="Save as PENDING approvals")
 @click.option("--force", is_flag=True, default=False, help="Force save even if duplicate exists")
 @click.option("--calibrated", is_flag=True, default=False, help="Apply historical calibration")
+@click.pass_context
 def recommendations(
-    sku: str | None, top: int, as_json: bool, output: str | None,
+    ctx: click.Context, sku: str | None, top: int, as_json: bool, output: str | None,
     save_pending: bool, force: bool, calibrated: bool,
 ) -> None:
     """Generate recommendations from current data."""
+    if ctx.invoked_subcommand is not None:
+        return
     import json
 
     import pandas as pd
@@ -517,6 +524,77 @@ def recommendations(
             )
 
         console.print(table)
+
+
+@recommendations.command("market-context")
+@click.option("--sku", default=None, help="Filter market context by SKU")
+def recommendations_market_context_cmd(sku: str | None) -> None:
+    """Show market context used by recommendation enrichment."""
+    from .decision.market_context import build_market_context
+
+    context = build_market_context(sku)
+    table = Table(title="Recommendation Market Context")
+    table.add_column("Field")
+    table.add_column("Value")
+    table.add_row("SKU", sku or "all/category")
+    table.add_row("Price pressure", context.price_pressure)
+    table.add_row("Competitor growth", context.competitor_growth)
+    table.add_row("Review pressure", context.review_pressure)
+    table.add_row("Rating pressure", context.rating_pressure)
+    table.add_row("Market risk score", f"{context.market_risk_score:.0f}")
+    table.add_row("Market opportunity score", f"{context.market_opportunity_score:.0f}")
+    table.add_row("Market signals", str(len(context.market_signals)))
+    table.add_row("Market risks", str(len(context.market_risks)))
+    table.add_row("Market opportunities", str(len(context.market_opportunities)))
+    console.print(table)
+
+
+@recommendations.command("explain")
+@click.option("--sku", default=None, help="Filter recommendations by SKU")
+@click.option("--top", default=5, help="Max recommendations to explain")
+def recommendations_explain_cmd(sku: str | None, top: int) -> None:
+    """Explain recommendation reasons including market context."""
+    from .decision.recommendation_summary import format_recommendation_text
+
+    recs = _generate_current_recommendations(sku=sku, top=top)
+    if not recs:
+        console.print("[yellow]No recommendations generated.[/]")
+        return
+
+    for index, rec in enumerate(recs, start=1):
+        console.print(f"[bold]Recommendation {index}[/]")
+        console.print(format_recommendation_text(rec))
+        console.print("")
+
+
+def _generate_current_recommendations(sku: str | None, top: int) -> list["Recommendation"]:
+    import pandas as pd
+
+    from .db.connection import execute_query
+    from .decision.feature_store import build_decision_features
+    from .decision.recommendation_engine import generate_recommendations
+
+    products = pd.DataFrame(execute_query("SELECT * FROM products"))
+    sales = pd.DataFrame(execute_query("SELECT * FROM sales"))
+    advertising = pd.DataFrame(execute_query("SELECT * FROM advertising"))
+    forecasts = pd.DataFrame(columns=["sku"])
+    stock = pd.DataFrame(columns=["sku"])
+    try:
+        rows = execute_query("SELECT * FROM forecasts")
+        if rows:
+            forecasts = pd.DataFrame(rows)
+    except Exception:
+        pass
+    try:
+        rows = execute_query("SELECT * FROM stock")
+        if rows:
+            stock = pd.DataFrame(rows)
+    except Exception:
+        pass
+    features = build_decision_features(products, sales, advertising, forecasts, stock)
+    if sku:
+        features = [feature for feature in features if feature.sku == sku]
+    return generate_recommendations(features, limit=top)
 
 
 @main.group()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ozon_agent.decision.confidence_engine import score_confidence
+from ozon_agent.decision.market_context import MarketContext, build_market_context
 from ozon_agent.decision.models import (
     DecisionFeature,
     Opportunity,
@@ -13,34 +14,52 @@ from ozon_agent.decision.opportunity_detector import detect_all_opportunities
 from ozon_agent.decision.risk_engine import score_risk
 
 
-def generate_recommendation(feature: DecisionFeature, opportunity: Opportunity) -> Recommendation:
+def generate_recommendation(
+    feature: DecisionFeature,
+    opportunity: Opportunity,
+    market_context: MarketContext | None = None,
+) -> Recommendation:
+    context = market_context or MarketContext()
     action = _map_action(feature, opportunity)
     confidence = score_confidence(feature, opportunity)
     risk = score_risk(feature, opportunity, action)
     return Recommendation(
         sku=feature.sku,
         action=action,
-        expected_effect=_expected_effect(feature, opportunity, action),
+        expected_effect=_expected_effect(feature, opportunity, action, context),
         confidence=confidence,
         risk=risk,
-        reason=opportunity.reason,
+        reason=_enriched_reason(opportunity.reason, context),
         supporting_metrics={
             **opportunity.metrics,
             "price": feature.price,
             "sales_quantity": feature.sales_quantity,
             "sales_revenue": feature.sales_revenue,
             "gross_profit_estimate": feature.gross_profit_estimate,
+            "market_context": {
+                "price_pressure": context.price_pressure,
+                "competitor_growth": context.competitor_growth,
+                "review_pressure": context.review_pressure,
+                "rating_pressure": context.rating_pressure,
+                "market_risk_score": context.market_risk_score,
+                "market_opportunity_score": context.market_opportunity_score,
+            },
         },
         created_at=utc_now_iso(),
         opportunity_type=opportunity.opportunity_type,
         campaign_id=feature.campaign_id,
         impact_score=opportunity.impact_score,
+        market_signals=context.market_signals,
+        market_risks=context.market_risks,
+        market_opportunities=context.market_opportunities,
     )
 
 
 def generate_recommendations(
     features: list[DecisionFeature],
     limit: int | None = None,
+    market_contexts: dict[str, MarketContext] | None = None,
+    include_market_context: bool = True,
 ) -> list[Recommendation]:
     feature_lookup = {(feature.sku, feature.campaign_id): feature for feature in features}
     recommendations: list[Recommendation] = []
@@ -48,7 +67,8 @@ def generate_recommendations(
         feature = feature_lookup.get((opportunity.sku, opportunity.campaign_id))
         if feature is None:
             continue
-        recommendations.append(generate_recommendation(feature, opportunity))
+        context = _context_for_feature(feature, market_contexts, include_market_context)
+        recommendations.append(generate_recommendation(feature, opportunity, context))
 
     recommendations.sort(
         key=lambda item: (-item.impact_score, -item.confidence.score, item.risk.score)
@@ -86,21 +106,66 @@ def _expected_effect(
     feature: DecisionFeature,
     opportunity: Opportunity,
     action: RecommendationAction,
+    market_context: MarketContext,
 ) -> str:
+    market_suffix = _market_expected_effect_suffix(market_context)
     if action is RecommendationAction.INCREASE_STOCK:
-        return "reduce stockout risk and preserve revenue continuity"
+        return f"reduce stockout risk and preserve revenue continuity{market_suffix}"
     if action is RecommendationAction.INCREASE_BUDGET:
-        return "capture incremental demand from efficient traffic"
+        return f"capture incremental demand from efficient traffic{market_suffix}"
     if action is RecommendationAction.DECREASE_BUDGET:
-        return "reduce inefficient ad spend and improve unit economics"
+        return f"reduce inefficient ad spend and improve unit economics{market_suffix}"
     if action is RecommendationAction.PAUSE_CAMPAIGN:
-        return "stop loss-making spend until attribution or conversion improves"
+        return f"stop loss-making spend until attribution or conversion improves{market_suffix}"
     if action is RecommendationAction.INCREASE_PRICE:
-        return "improve margin while demand remains stable"
+        return f"improve margin while demand remains stable{market_suffix}"
     if action is RecommendationAction.DECREASE_PRICE:
-        return "restore conversion by lowering price pressure"
+        return f"restore conversion by lowering price pressure{market_suffix}"
     if action is RecommendationAction.IMPROVE_CONTENT:
-        return "improve listing quality to protect ranking and conversion"
+        return f"improve listing quality to protect ranking and conversion{market_suffix}"
     if action is RecommendationAction.BOOST_REVIEWS:
-        return "improve social proof to stabilize ranking"
-    return f"monitor {opportunity.opportunity_type.value.lower()} without immediate action"
+        return f"improve social proof to stabilize ranking{market_suffix}"
+    return (
+        f"monitor {opportunity.opportunity_type.value.lower()} without immediate action"
+        f"{market_suffix}"
+    )
+
+
+def _context_for_feature(
+    feature: DecisionFeature,
+    market_contexts: dict[str, MarketContext] | None,
+    include_market_context: bool,
+) -> MarketContext:
+    if market_contexts is not None:
+        return market_contexts.get(feature.sku, market_contexts.get("category", MarketContext()))
+    if not include_market_context:
+        return MarketContext()
+    return build_market_context(feature.sku)
+
+
+def _enriched_reason(reason: str, market_context: MarketContext) -> str:
+    market_reasons: list[str] = []
+    if market_context.price_pressure == "HIGH":
+        market_reasons.append("market price pressure is high")
+    if market_context.competitor_growth == "HIGH":
+        market_reasons.append("new competitor pressure is high")
+    if market_context.review_pressure == "HIGH":
+        market_reasons.append("review pressure is high")
+    if market_context.rating_pressure == "HIGH":
+        market_reasons.append("rating pressure is high")
+    if not market_reasons:
+        return reason
+    return f"{reason}; market context: {', '.join(market_reasons)}"
+
+
+def _market_expected_effect_suffix(market_context: MarketContext) -> str:
+    checks: list[str] = []
+    if market_context.price_pressure == "HIGH":
+        checks.append("price")
+    if market_context.review_pressure == "HIGH":
+        checks.append("reviews")
+    if market_context.competitor_growth == "HIGH":
+        checks.append("competitive position")
+    if not checks:
+        return ""
+    return f" while reviewing {'/'.join(checks)} pressure"

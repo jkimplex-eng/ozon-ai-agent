@@ -18,6 +18,18 @@ def format_recommendation_text(rec: Recommendation) -> str:
     ]
     for key, value in rec.supporting_metrics.items():
         lines.append(f"  - {key}: {value}")
+    if rec.market_signals:
+        lines.append("Market signals:")
+        for signal in rec.market_signals:
+            lines.append(f"  - {signal.get('type')}: {signal.get('message')}")
+    if rec.market_risks:
+        lines.append("Market risks:")
+        for risk in rec.market_risks:
+            lines.append(f"  - {risk.get('type')}: {risk.get('message')}")
+    if rec.market_opportunities:
+        lines.append("Market opportunities:")
+        for opportunity in rec.market_opportunities:
+            lines.append(f"  - {opportunity.get('type')}: {opportunity.get('message')}")
     return "\n".join(lines)
 
 
@@ -49,4 +61,7 @@ def recommendation_to_dict(rec: Recommendation) -> dict[str, Any]:
         "opportunity_type": rec.opportunity_type.value,
         "campaign_id": rec.campaign_id,
         "impact_score": rec.impact_score,
+        "market_signals": rec.market_signals,
+        "market_risks": rec.market_risks,
+        "market_opportunities": rec.market_opportunities,
     }

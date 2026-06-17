@@ -1,5 +1,12 @@
 from ozon_agent.decision.confidence_engine import score_confidence
 from ozon_agent.decision.feature_store import build_decision_features
+from ozon_agent.decision.market_context import (
+    MarketContext,
+    build_market_context,
+    load_market_insights,
+    load_market_opportunities,
+    load_market_risks,
+)
 from ozon_agent.decision.models import (
     ConfidenceLevel,
     ConfidenceScore,
@@ -33,6 +40,7 @@ __all__ = [
     "ConfidenceLevel",
     "ConfidenceScore",
     "DecisionFeature",
+    "MarketContext",
     "Opportunity",
     "OpportunityType",
     "Recommendation",
@@ -40,6 +48,7 @@ __all__ = [
     "RiskLevel",
     "RiskScore",
     "build_decision_features",
+    "build_market_context",
     "detect_ad_opportunities",
     "detect_all_opportunities",
     "detect_price_opportunities",
@@ -47,6 +56,9 @@ __all__ = [
     "detect_stock_opportunities",
     "generate_recommendation",
     "generate_recommendations",
+    "load_market_insights",
+    "load_market_opportunities",
+    "load_market_risks",
     "format_recommendation_text",
     "format_recommendations_text",
     "recommendation_to_dict",

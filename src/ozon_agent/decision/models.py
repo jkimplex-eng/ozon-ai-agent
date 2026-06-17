@@ -125,6 +125,9 @@ class Recommendation:
     opportunity_type: OpportunityType
     campaign_id: str = ""
     impact_score: float = 0.0
+    market_signals: list[dict[str, Any]] = field(default_factory=list)
+    market_risks: list[dict[str, Any]] = field(default_factory=list)
+    market_opportunities: list[dict[str, Any]] = field(default_factory=list)
 
 
 def utc_now_iso() -> str:
