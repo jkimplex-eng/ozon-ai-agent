@@ -1,0 +1,10 @@
+rules:
+  - id: pricing-market-premium
+    domain: PRICING
+    title: Price above market can reduce conversion
+    condition: Own price is more than 10% above market.
+    recommendation: Check market price position before changing traffic or price.
+    rationale: A price premium above 10% can reduce conversion if not justified by value.
+    signals: [price_above_market]
+    metadata:
+      priority: HIGH

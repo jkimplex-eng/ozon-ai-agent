@@ -1,0 +1,10 @@
+rules:
+  - id: experiments-safe-hypothesis
+    domain: EXPERIMENTS
+    title: Turn uncertain changes into explicit experiments
+    condition: Recommendation is plausible but uncertainty remains.
+    recommendation: Frame the change as an experiment with baseline, target metric, and guardrails.
+    rationale: Experiments separate market noise from real business effect.
+    signals: [experiment_candidate]
+    metadata:
+      priority: MEDIUM

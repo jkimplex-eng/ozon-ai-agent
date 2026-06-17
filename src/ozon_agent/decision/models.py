@@ -128,6 +128,9 @@ class Recommendation:
     market_signals: list[dict[str, Any]] = field(default_factory=list)
     market_risks: list[dict[str, Any]] = field(default_factory=list)
     market_opportunities: list[dict[str, Any]] = field(default_factory=list)
+    knowledge_signals: list[dict[str, Any]] = field(default_factory=list)
+    knowledge_rules: list[dict[str, Any]] = field(default_factory=list)
+    knowledge_sources: list[dict[str, Any]] = field(default_factory=list)
 
 
 def utc_now_iso() -> str:

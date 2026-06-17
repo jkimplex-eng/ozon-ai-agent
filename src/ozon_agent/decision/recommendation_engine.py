@@ -12,6 +12,7 @@ from ozon_agent.decision.models import (
 )
 from ozon_agent.decision.opportunity_detector import detect_all_opportunities
 from ozon_agent.decision.risk_engine import score_risk
+from ozon_agent.knowledge.engine import build_knowledge_context
 
 
 def generate_recommendation(
@@ -23,13 +24,14 @@ def generate_recommendation(
     action = _map_action(feature, opportunity)
     confidence = score_confidence(feature, opportunity)
     risk = score_risk(feature, opportunity, action)
+    knowledge_context = build_knowledge_context(feature, opportunity, context)
     return Recommendation(
         sku=feature.sku,
         action=action,
         expected_effect=_expected_effect(feature, opportunity, action, context),
         confidence=confidence,
         risk=risk,
-        reason=_enriched_reason(opportunity.reason, context),
+        reason=_enriched_reason(opportunity.reason, context, knowledge_context),
         supporting_metrics={
             **opportunity.metrics,
             "price": feature.price,
@@ -52,6 +54,9 @@ def generate_recommendation(
         market_signals=context.market_signals,
         market_risks=context.market_risks,
         market_opportunities=context.market_opportunities,
+        knowledge_signals=knowledge_context["knowledge_signals"],
+        knowledge_rules=knowledge_context["knowledge_rules"],
+        knowledge_sources=knowledge_context["knowledge_sources"],
     )
 
 
@@ -143,7 +148,11 @@ def _context_for_feature(
     return build_market_context(feature.sku)
 
 
-def _enriched_reason(reason: str, market_context: MarketContext) -> str:
+def _enriched_reason(
+    reason: str,
+    market_context: MarketContext,
+    knowledge_context: dict[str, object],
+) -> str:
     market_reasons: list[str] = []
     if market_context.price_pressure == "HIGH":
         market_reasons.append("market price pressure is high")
@@ -153,6 +162,15 @@ def _enriched_reason(reason: str, market_context: MarketContext) -> str:
         market_reasons.append("review pressure is high")
     if market_context.rating_pressure == "HIGH":
         market_reasons.append("rating pressure is high")
+    knowledge_rules = knowledge_context.get("knowledge_rules", [])
+    if isinstance(knowledge_rules, list) and knowledge_rules:
+        rule_titles = [
+            str(item.get("title", ""))
+            for item in knowledge_rules[:3]
+            if isinstance(item, dict)
+        ]
+        if rule_titles:
+            market_reasons.append(f"knowledge rules: {', '.join(rule_titles)}")
     if not market_reasons:
         return reason
     return f"{reason}; market context: {', '.join(market_reasons)}"

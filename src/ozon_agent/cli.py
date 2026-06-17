@@ -1304,6 +1304,75 @@ def research_sources_cmd() -> None:
     console.print(table)
 
 
+@main.group()
+def knowledge() -> None:
+    """Inspect marketplace expert knowledge."""
+
+
+@knowledge.command("domains")
+def knowledge_domains_cmd() -> None:
+    """List knowledge domains."""
+    from .knowledge.repository import list_domains
+
+    table = Table(title="Marketplace Knowledge Domains")
+    table.add_column("Domain")
+    for domain in list_domains():
+        table.add_row(domain.value)
+    console.print(table)
+
+
+@knowledge.command("rules")
+@click.option("--domain", default=None, help="Filter by knowledge domain")
+def knowledge_rules_cmd(domain: str | None) -> None:
+    """List marketplace knowledge rules."""
+    from .knowledge.repository import list_rules
+
+    rules = list_rules(domain=domain) if domain else list_rules()
+    table = Table(title="Marketplace Knowledge Rules")
+    table.add_column("ID")
+    table.add_column("Domain")
+    table.add_column("Title")
+    table.add_column("Signals")
+    for rule in rules:
+        table.add_row(rule.id, rule.domain.value, rule.title, ", ".join(rule.signals))
+    console.print(table)
+
+
+@knowledge.command("search")
+@click.argument("query")
+def knowledge_search_cmd(query: str) -> None:
+    """Search marketplace knowledge rules."""
+    from .knowledge.repository import search_rules
+
+    rules = search_rules(query)
+    table = Table(title=f"Knowledge Search: {query}")
+    table.add_column("ID")
+    table.add_column("Domain")
+    table.add_column("Title")
+    table.add_column("Recommendation")
+    for rule in rules:
+        table.add_row(rule.id, rule.domain.value, rule.title, rule.recommendation)
+    console.print(table)
+
+
+@knowledge.command("explain")
+@click.option("--query", default="CTR", help="Knowledge query to explain")
+def knowledge_explain_cmd(query: str) -> None:
+    """Explain relevant knowledge rules."""
+    from .knowledge.engine import find_relevant_rules
+
+    rules = find_relevant_rules(query)
+    if not rules:
+        console.print(f"[yellow]No knowledge rules found for {query}[/]")
+        return
+    for rule in rules[:10]:
+        console.print(f"[bold]{rule.domain.value}_RULE: {rule.title}[/]")
+        console.print(f"Condition: {rule.condition}")
+        console.print(f"Recommendation: {rule.recommendation}")
+        console.print(f"Rationale: {rule.rationale}")
+        console.print("")
+
+
 @research.command("sample")
 def research_sample_cmd() -> None:
     """Show deterministic marketplace research output shape."""

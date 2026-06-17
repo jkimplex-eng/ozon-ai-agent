@@ -1,0 +1,9 @@
+experiments:
+  - id: exp-content-ctr
+    title: Improve main photo for low CTR SKU
+    domain: EXPERIMENTS
+    hypothesis: Improving the main image can increase CTR without changing price.
+    metric: CTR
+    source: marketplace_knowledge
+    metadata:
+      guardrail: conversion_rate

@@ -30,6 +30,14 @@ def format_recommendation_text(rec: Recommendation) -> str:
         lines.append("Market opportunities:")
         for opportunity in rec.market_opportunities:
             lines.append(f"  - {opportunity.get('type')}: {opportunity.get('message')}")
+    if rec.knowledge_signals:
+        lines.append("Knowledge signals:")
+        for signal in rec.knowledge_signals:
+            lines.append(f"  - {signal.get('domain')}: {signal.get('signal')}")
+    if rec.knowledge_rules:
+        lines.append("Knowledge rules:")
+        for rule in rec.knowledge_rules:
+            lines.append(f"  - {rule.get('domain')}: {rule.get('title')}")
     return "\n".join(lines)
 
 
@@ -64,4 +72,7 @@ def recommendation_to_dict(rec: Recommendation) -> dict[str, Any]:
         "market_signals": rec.market_signals,
         "market_risks": rec.market_risks,
         "market_opportunities": rec.market_opportunities,
+        "knowledge_signals": rec.knowledge_signals,
+        "knowledge_rules": rec.knowledge_rules,
+        "knowledge_sources": rec.knowledge_sources,
     }

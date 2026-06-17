@@ -1,0 +1,28 @@
+rules:
+  - id: ranking-ctr-position
+    domain: RANKING
+    title: CTR affects ranking positions
+    condition: CTR is below expected level or ranking trend is worsening.
+    recommendation: Review listing image, title, and offer attractiveness.
+    rationale: CTR can influence marketplace ranking and traffic quality.
+    signals: [low_ctr, ranking_drop]
+    metadata:
+      priority: HIGH
+  - id: ranking-cr-position
+    domain: RANKING
+    title: Conversion rate affects ranking positions
+    condition: Clicks are present but orders are weak.
+    recommendation: Check price, content, reviews, and delivery promise.
+    rationale: Weak conversion can reduce ranking stability.
+    signals: [low_cr]
+    metadata:
+      priority: HIGH
+  - id: ranking-stock-availability
+    domain: RANKING
+    title: Stock availability affects ranking
+    condition: Stock days are low or stockout probability is elevated.
+    recommendation: Review replenishment risk before scaling traffic.
+    rationale: Lack of stock can reduce ranking and sales continuity.
+    signals: [stock_risk]
+    metadata:
+      priority: HIGH

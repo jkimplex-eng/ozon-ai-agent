@@ -1,0 +1,10 @@
+rules:
+  - id: content-missing-characteristic
+    domain: CONTENT
+    title: Missing characteristics weaken card quality
+    condition: Required or useful product characteristics are missing.
+    recommendation: Fill missing characteristics and improve card completeness.
+    rationale: Complete cards are easier to understand and filter.
+    signals: [missing_characteristic]
+    metadata:
+      priority: MEDIUM

@@ -1,0 +1,10 @@
+rules:
+  - id: ads-high-ctr-low-cr
+    domain: ADS
+    title: High CTR with low conversion can indicate card issues
+    condition: Advertising CTR is high, but conversion rate is low.
+    recommendation: Inspect card content, reviews, price, and delivery before increasing budget.
+    rationale: Clicks without conversion often point to post-click offer or card problems.
+    signals: [high_ctr_low_cr]
+    metadata:
+      priority: HIGH

@@ -1,0 +1,19 @@
+rules:
+  - id: seo-title-query
+    domain: SEO
+    title: High-frequency query missing from title
+    condition: High-frequency query is missing from product title.
+    recommendation: Check title coverage for important search phrases.
+    rationale: Missing demand phrases can reduce CTR from search impressions.
+    signals: [missing_title_query, low_ctr]
+    metadata:
+      priority: HIGH
+  - id: seo-missing-characteristic
+    domain: SEO
+    title: Missing searchable characteristic
+    condition: Important characteristic is not filled.
+    recommendation: Fill searchable characteristics used by filters.
+    rationale: Missing characteristics can reduce filter impressions.
+    signals: [missing_characteristic]
+    metadata:
+      priority: MEDIUM

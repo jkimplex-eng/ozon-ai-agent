@@ -1,0 +1,10 @@
+rules:
+  - id: reviews-competitor-surge
+    domain: REVIEWS
+    title: Competitor review growth can strengthen positions
+    condition: Competitor review count is growing quickly.
+    recommendation: Review own social proof and review acquisition plan.
+    rationale: Review growth can strengthen competitor trust and ranking stability.
+    signals: [review_pressure]
+    metadata:
+      priority: HIGH

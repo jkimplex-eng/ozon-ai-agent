@@ -1,0 +1,10 @@
+rules:
+  - id: logistics-stock-ranking
+    domain: LOGISTICS
+    title: Delivery and stock stability affect conversion
+    condition: Stock or delivery promise is weak.
+    recommendation: Check stock and logistics constraints before pushing demand.
+    rationale: Traffic growth is risky when stock or delivery promise is unstable.
+    signals: [stock_risk]
+    metadata:
+      priority: MEDIUM

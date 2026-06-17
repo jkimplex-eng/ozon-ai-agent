@@ -35,6 +35,7 @@ from ozon_agent.decision.recommendation_summary import (
     recommendation_to_dict,
 )
 from ozon_agent.decision.risk_engine import score_risk
+from ozon_agent.knowledge.engine import build_knowledge_context, evaluate_rules
 
 __all__ = [
     "ConfidenceLevel",
@@ -49,6 +50,7 @@ __all__ = [
     "RiskScore",
     "build_decision_features",
     "build_market_context",
+    "build_knowledge_context",
     "detect_ad_opportunities",
     "detect_all_opportunities",
     "detect_price_opportunities",
@@ -64,4 +66,5 @@ __all__ = [
     "recommendation_to_dict",
     "score_confidence",
     "score_risk",
+    "evaluate_rules",
 ]
