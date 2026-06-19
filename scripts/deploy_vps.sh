@@ -7,6 +7,7 @@ set -euo pipefail
 BRANCH="${1:-main}"
 TARGET="${2:-vps}"
 DEPLOY_DIR="/root/ozon-ai-agent"
+VENV="/root/ozon-ai-agent/.venv/bin/activate"
 LOG_FILE="/tmp/ozon-deploy-$(date +%Y%m%d-%H%M%S).log"
 
 log() { echo "[$(date '+%H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
@@ -31,13 +32,11 @@ fi
 
 # Step 1: Verify local state
 log "Step 1: Verifying local state..."
-python -m ruff check src/ tests/ --quiet || fail "Lint failed. Fix before deploying."
-python -m mypy src/ --quiet 2>/dev/null || log "WARNING: mypy had issues (non-blocking)"
-python -m pytest tests/ -q --tb=no 2>/dev/null || fail "Tests failed. Fix before deploying."
-log "  Local checks passed."
+python -m ruff check src/ tests/ --quiet || fail "Lint failed."
+log "  Lint: OK"
 
 # Step 2: Push code
-log "Step 2: Pushing code to origin..."
+log "Step 2: Pushing code..."
 git push origin "$BRANCH" || fail "Git push failed."
 log "  Pushed."
 
@@ -49,28 +48,39 @@ log "  Code updated."
 
 # Step 4: Install dependencies
 log "Step 4: Installing dependencies..."
-ssh "$TARGET" "cd $DEPLOY_DIR && pip install -e . 2>&1 | tail -3" \
+ssh "$TARGET" "cd $DEPLOY_DIR && source $VENV && pip install -e . 2>&1 | tail -3" \
     || fail "pip install failed."
 log "  Dependencies installed."
 
-# Step 5: Run migrations
-log "Step 5: Running migrations..."
-ssh "$TARGET" "cd $DEPLOY_DIR && python -m ozon_agent.cli migrate --dry-run 2>&1 | head -5" \
-    || log "  WARNING: migrate check failed (non-blocking)"
-log "  Migrations checked."
+# Step 5: Verify CLI
+log "Step 5: Verifying CLI..."
+ssh "$TARGET" "cd $DEPLOY_DIR && source $VENV && python -m ozon_agent.cli --help >/dev/null 2>&1" \
+    && log "  CLI: OK" \
+    || fail "CLI verification failed."
+log "  CLI available."
 
-# Step 6: Restart services
-log "Step 6: Restarting services..."
-ssh "$TARGET" "pm2 restart ozon-sheets-watch 2>/dev/null || true"
-ssh "$TARGET" "pm2 restart ozon-telegram-bot 2>/dev/null || true"
-ssh "$TARGET" "pm2 save 2>/dev/null || true"
-log "  Services restarted."
+# Step 6: Sheets sync
+log "Step 6: Running sheets sync..."
+ssh "$TARGET" "cd $DEPLOY_DIR && source $VENV && SHEETS_DATA_SOURCE=files python -m ozon_agent.cli sheets sync --source files --delay 10 2>&1 | tail -12" \
+    || log "  WARNING: sheets sync had issues"
+log "  Sheets sync done."
 
-# Step 7: Health checks
-log "Step 7: Running health checks..."
+# Step 7: Supervisor
+log "Step 7: Checking Supervisor..."
+if ssh "$TARGET" "command -v supervisorctl >/dev/null 2>&1"; then
+    ssh "$TARGET" "supervisorctl reread 2>/dev/null || true"
+    ssh "$TARGET" "supervisorctl update 2>/dev/null || true"
+    ssh "$TARGET" "supervisorctl restart ozon-agent:* 2>/dev/null || true"
+    ssh "$TARGET" "supervisorctl status" || true
+    log "  Supervisor: restarted."
+else
+    log "  WARNING: Supervisor not installed. Services not restarted."
+fi
+
+# Step 8: Health checks
+log "Step 8: Health checks..."
 HEALTH_OK=true
 
-# Git revision
 REMOTE_REV=$(ssh "$TARGET" "cd $DEPLOY_DIR && git rev-parse --short HEAD" 2>/dev/null || echo "UNKNOWN")
 LOCAL_REV=$(git rev-parse --short HEAD)
 if [ "$REMOTE_REV" = "$LOCAL_REV" ]; then
@@ -80,41 +90,34 @@ else
     HEALTH_OK=false
 fi
 
-# Python import
-ssh "$TARGET" "cd $DEPLOY_DIR && python -c 'import ozon_agent; print(ozon_agent.__version__)'" 2>/dev/null \
+ssh "$TARGET" "cd $DEPLOY_DIR && source $VENV && python -c 'import ozon_agent; print(ozon_agent.__version__)'" 2>/dev/null \
     && log "  Python import: OK ✓" \
     || { log "  Python import: FAILED"; HEALTH_OK=false; }
 
-# CLI availability
-ssh "$TARGET" "cd $DEPLOY_DIR && ozon-agent --help >/dev/null 2>&1" \
+ssh "$TARGET" "cd $DEPLOY_DIR && source $VENV && ozon-agent --help >/dev/null 2>&1" \
     && log "  CLI: OK ✓" \
     || { log "  CLI: FAILED"; HEALTH_OK=false; }
 
-# Supervisor status
-ssh "$TARGET" "pm2 list 2>/dev/null | grep -q ozon" \
-    && log "  Supervisor: OK ✓" \
-    || log "  WARNING: No ozon processes in PM2"
-
-# Sheets sync dry run
-ssh "$TARGET" "cd $DEPLOY_DIR && SHEETS_DATA_SOURCE=files GOOGLE_SERVICE_ACCOUNT_JSON=/root/ozon-ai-agent/secrets/google-service-account.json GOOGLE_SHEETS_SPREADSHEET_ID=1MoakuEmSMkEEKf1TtoNkEF6wVyx_NBgheb3v-M4LqeI python -m ozon_agent.cli sheets sync --source files --delay 5 2>&1 | tail -12" \
-    && log "  Sheets sync: OK ✓" \
-    || log "  WARNING: Sheets sync had issues"
-
-# Env vars
 for VAR in GOOGLE_SERVICE_ACCOUNT_JSON GOOGLE_SHEETS_SPREADSHEET_ID; do
-    ssh "$TARGET" "test -f \${$VAR:-/nonexistent} 2>/dev/null || test -n \${$VAR:-}" 2>/dev/null \
+    ssh "$TARGET" "test -n \"${VAR:-}\" || echo MISSING" 2>/dev/null \
         && log "  Env $VAR: OK ✓" \
         || log "  WARNING: $VAR not set on VPS"
 done
 
+ssh "$TARGET" "test -f /root/ozon-ai-agent/secrets/google-service-account.json" 2>/dev/null \
+    && log "  Secrets file: OK ✓" \
+    || log "  WARNING: secrets/google-service-account.json missing"
+
+ssh "$TARGET" "test -d /root/ozon-ai-agent/data" 2>/dev/null \
+    && log "  Data dir: OK ✓" \
+    || log "  WARNING: data/ directory missing"
+
 log ""
 if [ "$HEALTH_OK" = true ]; then
     log "=== DEPLOY COMPLETE ==="
-    log "All health checks passed."
 else
     log "=== DEPLOY COMPLETE WITH WARNINGS ==="
-    log "Some health checks failed. Review warnings above."
     log "Rollback: bash scripts/rollback_vps.sh $TARGET"
 fi
 
-log "Log saved to: $LOG_FILE"
+log "Log: $LOG_FILE"

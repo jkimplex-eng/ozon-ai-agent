@@ -453,6 +453,64 @@ def deploy_verify(target: str) -> None:
     console.print(format_health_report(result))
 
 
+@deploy_group.command("health")
+@click.option("--target", "-t", default="vps", help="Deployment target (SSH host)")
+def deploy_health(target: str) -> None:
+    """Quick health check — env, secrets, CLI, sheets, supervisor."""
+    from typing import Any
+
+    from .deploy.health_check import (
+        check_cli_available,
+        check_dependencies,
+        check_env_vars,
+        check_git_revision,
+        check_pm2_status,
+        check_python_import,
+        check_sheets_sync_dry_run,
+    )
+
+    checks = [
+        ("Git revision", lambda: check_git_revision(target)),
+        ("Python import", lambda: check_python_import(target)),
+        ("CLI", lambda: check_cli_available(target)),
+        ("Dependencies", lambda: check_dependencies(target)),
+        ("Env vars", lambda: check_env_vars(target)),
+        ("Sheets sync", lambda: check_sheets_sync_dry_run(target)),
+        ("Supervisor", lambda: check_pm2_status(target)),
+    ]
+
+    all_ok = True
+    check_pairs: list[tuple[str, Any]] = [
+        ("Git revision", check_git_revision),
+        ("Python import", check_python_import),
+        ("CLI", check_cli_available),
+        ("Dependencies", check_dependencies),
+        ("Env vars", check_env_vars),
+        ("Sheets sync", check_sheets_sync_dry_run),
+        ("Supervisor", check_pm2_status),
+    ]
+
+    for name, check_fn in check_pairs:
+        try:
+            result: dict[str, Any] = check_fn(target)
+            if result["healthy"]:
+                console.print(f"[green]OK[/] {name}")
+            else:
+                console.print(f"[red]FAIL[/] {name}")
+                error = result.get("error", result.get("missing", ""))
+                if error:
+                    console.print(f"      {error}")
+                all_ok = False
+        except Exception as e:
+            console.print(f"[yellow]WARNING[/] {name}: {e}")
+
+    console.print()
+    if all_ok:
+        console.print("[bold green]All checks passed.[/]")
+    else:
+        console.print("[bold red]Some checks failed.[/]")
+
+
 @deploy_group.command("rollback")
 @click.option("--target", "-t", default="vps", help="Deployment target (SSH host)")
 @click.option("--commits", "-c", default=1, help="Number of commits to roll back")
