@@ -21,6 +21,12 @@ from gspread_formatting import (
     ConditionalFormatRule,
     GridRange,
 )
+from gspread_formatting import (
+    set_column_width as gsf_set_column_width,
+)
+from gspread_formatting import (
+    set_row_height as gsf_set_row_height,
+)
 from gspread_formatting.models import Color
 
 logger = logging.getLogger(__name__)
@@ -70,7 +76,7 @@ def apply_header_format(ws: gspread.Worksheet, num_cols: int) -> None:
     )
     fmt_range = f"A1:{_col_letter(num_cols)}1"
     gsf.format_cell_range(ws, fmt_range, fmt)
-    ws.set_row_height(1, 32)  # type: ignore[attr-defined]
+    gsf_set_row_height(ws, "1", 32)
 
 
 def apply_status_colors(
@@ -116,7 +122,8 @@ def auto_resize_columns(
     for i, header in enumerate(headers, 1):
         key = header.lower().strip()
         width = column_map.get(key, COLUMN_WIDTHS.get(key, COLUMN_WIDTHS["default"]))
-        ws.set_column_width(i, width)  # type: ignore[attr-defined]
+        col_label = _col_letter(i)
+        gsf_set_column_width(ws, col_label, width)
 
 
 def freeze_header(ws: gspread.Worksheet) -> None:
