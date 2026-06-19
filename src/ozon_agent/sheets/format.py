@@ -79,7 +79,7 @@ def apply_status_colors(
     for status, color in STATUS_COLORS.items():
         rule = ConditionalFormatRule(
             ranges=[GridRange(ws.id, 2, total_rows + 1, status_col - 1, status_col)],
-            rule=BooleanRule(
+            booleanRule=BooleanRule(
                 condition=BooleanCondition(
                     "CUSTOM_FORMULA", [f'={col_letter}2="{status}"']
                 ),

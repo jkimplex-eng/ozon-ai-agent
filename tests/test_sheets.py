@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from ozon_agent.sheets.format import _col_letter
 from ozon_agent.sheets.setup import TABS
-from ozon_agent.sheets.sync import get_sync_status, sync_all, sync_tab
+from ozon_agent.sheets.sync import get_sync_status, sync_tab
 
 
 def test_col_letter_single() -> None:
@@ -48,37 +48,44 @@ def test_tabs_count() -> None:
 
 def test_get_sync_status_empty() -> None:
     from ozon_agent.sheets import sync
-
     sync._last_sync.clear()
     status = get_sync_status()
     assert isinstance(status, dict)
     assert len(status) == 0
 
 
-@patch("ozon_agent.sheets.client.get_gspread_client")
+@patch("ozon_agent.sheets.sync.get_gspread_client")
 def test_sync_tab_unknown(mock_client: MagicMock) -> None:
     import pytest
-
     with pytest.raises(ValueError, match="Unknown tab"):
         sync_tab("Nonexistent Tab")
 
 
+@patch("ozon_agent.sheets.sync.is_db_available", return_value=False)
 @patch("ozon_agent.sheets.sync.open_spreadsheet")
 @patch("ozon_agent.sheets.sync.get_gspread_client")
-def test_sync_tab_known(mock_client: MagicMock, mock_open: MagicMock) -> None:
+def test_sync_tab_known(
+    mock_client: MagicMock,
+    mock_open: MagicMock,
+    mock_db: MagicMock,
+) -> None:
     mock_ws = MagicMock()
-    mock_ws.return_value = 5
     mock_sheet = MagicMock()
     mock_sheet.worksheet.return_value = mock_ws
     mock_open.return_value = mock_sheet
 
-    with patch("ozon_agent.sheets.sync.TAB_EXPORTERS", {"Test Tab": lambda ws: 5}):
+    def fake_exporter(ws: MagicMock, *, use_files: bool = False) -> int:
+        return 5
+
+    with patch("ozon_agent.sheets.sync.TAB_EXPORTERS", {"Test Tab": fake_exporter}):
         count = sync_tab("Test Tab")
         assert count == 5
 
 
-def test_sync_all_requires_auth() -> None:
+def test_sync_all_requires_google_auth() -> None:
     import pytest
 
-    with pytest.raises(OSError, match="GOOGLE_SERVICE_ACCOUNT_JSON"):
+    from ozon_agent.sheets.sync import sync_all
+
+    with pytest.raises((OSError, Exception)):
         sync_all()

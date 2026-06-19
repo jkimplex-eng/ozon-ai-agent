@@ -81,3 +81,13 @@ def close_pool() -> None:
     if _pool is not None:
         _pool.close()
         _pool = None
+
+
+def is_db_available() -> bool:
+    """Check if PostgreSQL is reachable. Returns False on any connection error."""
+    try:
+        with get_cursor() as cur:
+            cur.execute("SELECT 1")
+        return True
+    except Exception:
+        return False

@@ -2294,21 +2294,26 @@ def sheets_setup(title: str) -> None:
 
 @sheets.command("sync")
 @click.option("--tab", default=None, help="Sync single tab (default: all)")
-def sheets_sync(tab: str | None) -> None:
+@click.option(
+    "--source", default=None,
+    type=click.Choice(["auto", "db", "files"]),
+    help="Data source: auto (detect), db (PostgreSQL), files (file-based only)",
+)
+def sheets_sync(tab: str | None, source: str | None) -> None:
     """Sync agent data to Google Sheets."""
     from .sheets.sync import sync_all, sync_tab
 
     if tab:
         console.print(f"[bold blue]Syncing {tab}...[/]")
         try:
-            count = sync_tab(tab)
+            count = sync_tab(tab, source=source)
             console.print(f"[green]{tab}: {count} rows[/]")
         except Exception as e:
             console.print(f"[red]Failed: {e}[/]")
         return
 
     console.print("[bold blue]Syncing all tabs...[/]")
-    results = sync_all()
+    results = sync_all(source=source)
 
     table = Table(title="Sheets Sync Results")
     table.add_column("Tab")
