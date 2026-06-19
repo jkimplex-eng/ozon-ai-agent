@@ -2268,5 +2268,93 @@ def _resolve_short_experiment_id(short_id: str) -> str | None:
     return None
 
 
+@main.group()
+def sheets() -> None:
+    """Google Sheets operations interface."""
+
+
+@sheets.command("setup")
+@click.option("--title", default="Ozon AI Agent", help="Spreadsheet title")
+def sheets_setup(title: str) -> None:
+    """Create a new Google Spreadsheet with all 8 tabs."""
+    from .sheets.setup import setup_spreadsheet
+
+    console.print(f"[bold blue]Creating spreadsheet: {title}...[/]")
+    try:
+        spreadsheet_id = setup_spreadsheet(title)
+        console.print("[bold green]Spreadsheet created![/]")
+        console.print(f"  ID: {spreadsheet_id}")
+        console.print(f"  URL: https://docs.google.com/spreadsheets/d/{spreadsheet_id}")
+        console.print("")
+        console.print("[bold yellow]Add to .env:[/]")
+        console.print(f"  GOOGLE_SHEETS_SPREADSHEET_ID={spreadsheet_id}")
+    except Exception as e:
+        console.print(f"[red]Failed: {e}[/]")
+
+
+@sheets.command("sync")
+@click.option("--tab", default=None, help="Sync single tab (default: all)")
+def sheets_sync(tab: str | None) -> None:
+    """Sync agent data to Google Sheets."""
+    from .sheets.sync import sync_all, sync_tab
+
+    if tab:
+        console.print(f"[bold blue]Syncing {tab}...[/]")
+        try:
+            count = sync_tab(tab)
+            console.print(f"[green]{tab}: {count} rows[/]")
+        except Exception as e:
+            console.print(f"[red]Failed: {e}[/]")
+        return
+
+    console.print("[bold blue]Syncing all tabs...[/]")
+    results = sync_all()
+
+    table = Table(title="Sheets Sync Results")
+    table.add_column("Tab")
+    table.add_column("Rows")
+    table.add_column("Status")
+
+    for tab_name, count in results.items():
+        if count >= 0:
+            table.add_row(tab_name, str(count), "[green]OK[/]")
+        else:
+            table.add_row(tab_name, "—", "[red]FAILED[/]")
+    console.print(table)
+
+    total = sum(v for v in results.values() if v > 0)
+    console.print(f"[bold green]Total: {total} rows synced[/]")
+
+
+@sheets.command("watch")
+@click.option("--interval", default=30, help="Sync interval in minutes")
+def sheets_watch(interval: int) -> None:
+    """Start background auto-refresh sync."""
+    from .sheets.scheduler import start_watcher
+
+    console.print(f"[bold blue]Starting sheets watcher (every {interval} min)...[/]")
+    console.print("[yellow]Press Ctrl+C to stop[/]")
+    start_watcher(interval_minutes=interval)
+
+
+@sheets.command("status")
+def sheets_status() -> None:
+    """Show last sync time per tab."""
+    from .sheets.sync import get_sync_status
+
+    status = get_sync_status()
+    if not status:
+        console.print("[yellow]No sync history. Run 'ozon-agent sheets sync' first.[/]")
+        return
+
+    table = Table(title="Sheets Sync Status")
+    table.add_column("Tab")
+    table.add_column("Last Sync")
+
+    for tab, ts in sorted(status.items()):
+        table.add_row(tab, ts)
+    console.print(table)
+
+
 if __name__ == "__main__":
     main()

@@ -25,6 +25,10 @@ dependencies = [
     "rich>=13.7",
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
+    "gspread>=6.0",
+    "gspread-formatting>=1.2",
+    "gspread-dataframe>=3.3",
+    "APScheduler>=3.10",
 ]
 
 [project.optional-dependencies]
@@ -48,6 +52,16 @@ select = ["E", "F", "I", "N", "W", "UP"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
+
+[[tool.mypy.overrides]]
+module = [
+    "gspread.*",
+    "gspread_formatting.*",
+    "gspread_dataframe.*",
+    "oauth2client.*",
+    "apscheduler.*",
+]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

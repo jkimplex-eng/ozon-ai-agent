@@ -265,7 +265,7 @@ def scan_decision_modules_forbidden() -> list[str]:
 
 def scan_approval_telegram_forbidden() -> list[str]:
     found: list[str] = []
-    for module_name in ("approval", "telegram", "learning", "experiments"):
+    for module_name in ("approval", "telegram", "learning", "experiments", "sheets"):
         module_dir = os.path.join(os.path.dirname(__file__), "..", module_name)
         if not os.path.isdir(module_dir):
             continue
