@@ -115,6 +115,7 @@ def test_supervisor_config_uses_venv() -> None:
     assert ".venv/bin/python" in content
     assert "autostart=true" in content
     assert "sheets watch --interval 30" in content
+    assert 'SHEETS_SYNC_DELAY_SECONDS="30"' in content
     assert "--source files" not in content
 
 
