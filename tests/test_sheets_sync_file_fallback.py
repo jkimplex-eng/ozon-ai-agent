@@ -4,7 +4,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from ozon_agent.sheets.file_source import has_any_file_data
-from ozon_agent.sheets.sync import _resolve_source
+from ozon_agent.sheets.sync import _load_sync_status, _resolve_source, _save_sync_status
 
 
 def test_resolve_source_files_explicit() -> None:
@@ -151,3 +151,42 @@ def test_export_experiments_use_files_skips_db() -> None:
         mock_ws.row_values.return_value = ["col1", "col2"]
         export_experiments(mock_ws, use_files=True)
         mock_db.assert_not_called()
+
+
+def test_sync_status_persistence() -> None:
+    from ozon_agent.sheets.sync import _SYNC_STATUS_FILE
+
+    _SYNC_STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _save_sync_status({"Daily Report": "2026-01-01T00:00:00"})
+
+    loaded = _load_sync_status()
+    assert loaded["Daily Report"] == "2026-01-01T00:00:00"
+
+    _save_sync_status({"Daily Report": "2026-01-01T00:00:00", "Recommendations": "2026-01-02"})
+    loaded = _load_sync_status()
+    assert len(loaded) == 2
+    assert loaded["Recommendations"] == "2026-01-02"
+
+    _SYNC_STATUS_FILE.unlink(missing_ok=True)
+
+
+def test_sync_status_load_missing_file() -> None:
+    from ozon_agent.sheets.sync import _SYNC_STATUS_FILE
+
+    if _SYNC_STATUS_FILE.exists():
+        _SYNC_STATUS_FILE.unlink()
+
+    loaded = _load_sync_status()
+    assert loaded == {}
+
+
+def test_sync_status_load_corrupt_file() -> None:
+    from ozon_agent.sheets.sync import _SYNC_STATUS_FILE
+
+    _SYNC_STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _SYNC_STATUS_FILE.write_text("not json {{{", encoding="utf-8")
+
+    loaded = _load_sync_status()
+    assert loaded == {}
+
+    _SYNC_STATUS_FILE.unlink(missing_ok=True)

@@ -47,8 +47,9 @@ def test_tabs_count() -> None:
 
 
 def test_get_sync_status_empty() -> None:
-    from ozon_agent.sheets import sync
-    sync._last_sync.clear()
+    from ozon_agent.sheets.sync import _SYNC_STATUS_FILE
+    if _SYNC_STATUS_FILE.exists():
+        _SYNC_STATUS_FILE.unlink()
     status = get_sync_status()
     assert isinstance(status, dict)
     assert len(status) == 0

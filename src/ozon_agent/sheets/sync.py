@@ -1,10 +1,12 @@
 """Sync orchestrator — coordinates all tab exporters with throttling."""
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from ozon_agent.db.connection import is_db_available
@@ -35,7 +37,27 @@ TAB_EXPORTERS: dict[str, Any] = {
     "Approvals": export_approvals,
 }
 
-_last_sync: dict[str, str] = {}
+_SYNC_STATUS_FILE = Path("data") / "sheets" / "sync_status.json"
+
+
+def _load_sync_status() -> dict[str, str]:
+    """Load last sync times from disk."""
+    if _SYNC_STATUS_FILE.exists():
+        try:
+            data = json.loads(_SYNC_STATUS_FILE.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_sync_status(status: dict[str, str]) -> None:
+    """Persist last sync times to disk."""
+    _SYNC_STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _SYNC_STATUS_FILE.write_text(
+        json.dumps(status, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 
 def _resolve_source(source: str | None) -> bool:
@@ -87,7 +109,9 @@ def _sync_one_tab(
             return int(exporter(ws, use_files=use_files))
 
         count = int(retry_on_rate_limit(_do_write))
-        _last_sync[tab_name] = datetime.now(UTC).isoformat()
+        status = _load_sync_status()
+        status[tab_name] = datetime.now(UTC).isoformat()
+        _save_sync_status(status)
         logger.info("Synced %s: %d rows", tab_name, count)
 
         if not is_last:
@@ -152,10 +176,12 @@ def sync_tab(
         return int(exporter(ws, use_files=use_files))
 
     count = int(retry_on_rate_limit(_do_write))
-    _last_sync[tab_name] = datetime.now(UTC).isoformat()
+    status = _load_sync_status()
+    status[tab_name] = datetime.now(UTC).isoformat()
+    _save_sync_status(status)
     return count
 
 
 def get_sync_status() -> dict[str, str]:
-    """Return last sync time per tab."""
-    return dict(_last_sync)
+    """Return last sync time per tab from disk."""
+    return _load_sync_status()
