@@ -2299,7 +2299,8 @@ def sheets_setup(title: str) -> None:
     type=click.Choice(["auto", "db", "files"]),
     help="Data source: auto (detect), db (PostgreSQL), files (file-based only)",
 )
-def sheets_sync(tab: str | None, source: str | None) -> None:
+@click.option("--delay", default=None, type=int, help="Delay between tabs in seconds (default: 10)")
+def sheets_sync(tab: str | None, source: str | None, delay: int | None) -> None:
     """Sync agent data to Google Sheets."""
     from .sheets.sync import sync_all, sync_tab
 
@@ -2313,7 +2314,7 @@ def sheets_sync(tab: str | None, source: str | None) -> None:
         return
 
     console.print("[bold blue]Syncing all tabs...[/]")
-    results = sync_all(source=source)
+    results = sync_all(source=source, delay=delay)
 
     table = Table(title="Sheets Sync Results")
     table.add_column("Tab")

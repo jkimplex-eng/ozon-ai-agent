@@ -1,13 +1,18 @@
-"""Sync orchestrator — coordinates all tab exporters."""
+"""Sync orchestrator — coordinates all tab exporters with throttling."""
 from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import UTC, datetime
 from typing import Any
 
 from ozon_agent.db.connection import is_db_available
-from ozon_agent.sheets.client import get_gspread_client, open_spreadsheet
+from ozon_agent.sheets.client import (
+    get_gspread_client,
+    open_spreadsheet,
+    retry_on_rate_limit,
+)
 from ozon_agent.sheets.exporters.approvals import export_approvals
 from ozon_agent.sheets.exporters.competitors import export_competitors
 from ozon_agent.sheets.exporters.daily_report import export_daily_report
@@ -53,31 +58,74 @@ def _resolve_source(source: str | None) -> bool:
         return True
 
 
+def _get_delay(delay: int | None) -> int:
+    """Get sync delay in seconds from param, env, or default."""
+    if delay is not None:
+        return delay
+    env_delay = os.environ.get("SHEETS_SYNC_DELAY_SECONDS")
+    if env_delay:
+        return int(env_delay)
+    return 10
+
+
+def _sync_one_tab(
+    tab_name: str,
+    exporter: Any,
+    use_files: bool,
+    spreadsheet: Any,
+    delay: int,
+    is_last: bool,
+) -> int:
+    """Sync a single tab with retry on 429.
+
+    Returns row count or -1 on failure.
+    """
+    try:
+        ws = spreadsheet.worksheet(tab_name)
+
+        def _do_write() -> int:
+            return int(exporter(ws, use_files=use_files))
+
+        count = int(retry_on_rate_limit(_do_write))
+        _last_sync[tab_name] = datetime.now(UTC).isoformat()
+        logger.info("Synced %s: %d rows", tab_name, count)
+
+        if not is_last:
+            logger.debug("Waiting %ds before next tab...", delay)
+            time.sleep(delay)
+
+        return count
+    except Exception as e:
+        logger.error("Failed to sync %s: %s", tab_name, e)
+        return -1
+
+
 def sync_all(
     spreadsheet_id: str | None = None,
     source: str | None = None,
+    delay: int | None = None,
 ) -> dict[str, int]:
-    """Sync all tabs. Returns {tab_name: row_count}."""
+    """Sync all tabs with throttling. Returns {tab_name: row_count}."""
     use_files = _resolve_source(source)
+    sync_delay = _get_delay(delay)
+
     if use_files:
         logger.info("Using file-based data sources (PostgreSQL unavailable or source=files)")
     else:
         logger.info("Using PostgreSQL data sources")
+    logger.info("Sync delay between tabs: %ds", sync_delay)
 
     client = get_gspread_client()
     spreadsheet = open_spreadsheet(client, spreadsheet_id)
     results: dict[str, int] = {}
 
-    for tab_name, exporter in TAB_EXPORTERS.items():
-        try:
-            ws = spreadsheet.worksheet(tab_name)
-            count = exporter(ws, use_files=use_files)
-            results[tab_name] = count
-            _last_sync[tab_name] = datetime.now(UTC).isoformat()
-            logger.info("Synced %s: %d rows", tab_name, count)
-        except Exception as e:
-            results[tab_name] = -1
-            logger.error("Failed to sync %s: %s", tab_name, e)
+    tab_names = list(TAB_EXPORTERS.keys())
+    for idx, tab_name in enumerate(tab_names):
+        is_last = idx == len(tab_names) - 1
+        exporter = TAB_EXPORTERS[tab_name]
+        results[tab_name] = _sync_one_tab(
+            tab_name, exporter, use_files, spreadsheet, sync_delay, is_last,
+        )
 
     return results
 
@@ -99,7 +147,11 @@ def sync_tab(
     client = get_gspread_client()
     spreadsheet = open_spreadsheet(client, spreadsheet_id)
     ws = spreadsheet.worksheet(tab_name)
-    count = int(exporter(ws, use_files=use_files))
+
+    def _do_write() -> int:
+        return int(exporter(ws, use_files=use_files))
+
+    count = int(retry_on_rate_limit(_do_write))
     _last_sync[tab_name] = datetime.now(UTC).isoformat()
     return count
 
