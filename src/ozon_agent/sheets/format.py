@@ -10,6 +10,8 @@ Provides consistent formatting for all tabs:
 """
 from __future__ import annotations
 
+import logging
+
 import gspread
 import gspread_formatting as gsf
 from gspread_formatting import (
@@ -20,6 +22,8 @@ from gspread_formatting import (
     GridRange,
 )
 from gspread_formatting.models import Color
+
+logger = logging.getLogger(__name__)
 
 HEADER_BACKGROUND = Color(0.102, 0.137, 0.494)
 HEADER_FONT_COLOR = Color(1, 1, 1)
@@ -74,6 +78,17 @@ def apply_status_colors(
     status_col: int,
     total_rows: int,
 ) -> None:
+    try:
+        _apply_status_colors_inner(ws, status_col, total_rows)
+    except (AttributeError, TypeError) as e:
+        logger.debug("Conditional formatting skipped: %s", e)
+
+
+def _apply_status_colors_inner(
+    ws: gspread.Worksheet,
+    status_col: int,
+    total_rows: int,
+) -> None:
     col_letter = _col_letter(status_col)
     rules: list[ConditionalFormatRule] = []
     for status, color in STATUS_COLORS.items():
@@ -117,8 +132,11 @@ def apply_conditional_rules(
     ws: gspread.Worksheet,
     rules: list[ConditionalFormatRule],
 ) -> None:
-    existing = gsf.get_conditional_format_rules(ws)
-    gsf.set_conditional_format_rules(ws, existing + rules)
+    try:
+        existing = gsf.get_conditional_format_rules(ws)
+        gsf.set_conditional_format_rules(ws, existing + rules)
+    except (AttributeError, TypeError) as e:
+        logger.debug("Conditional rules skipped: %s", e)
 
 
 def _col_letter(col_num: int) -> str:
