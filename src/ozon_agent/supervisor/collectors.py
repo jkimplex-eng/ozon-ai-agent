@@ -1,4 +1,5 @@
 """Data collectors for audit report."""
+import os
 import subprocess
 from typing import Any
 
@@ -37,27 +38,28 @@ def get_test_results() -> dict[str, Any]:
         "lint_status": "unknown", "type_status": "unknown",
     }
 
-    try:
-        result = subprocess.run(
-            ["python", "-m", "pytest", "tests/", "-q", "--tb=no"],
-            capture_output=True, text=True, timeout=120,
-        )
-        output = result.stdout
-        for line in output.split("\n"):
-            if "passed" in line:
-                parts = line.split()
-                for i, p in enumerate(parts):
-                    if "passed" in p:
-                        results["passed"] = int(parts[i - 1])
-                        results["total"] = results["passed"]
-            if "failed" in line:
-                parts = line.split()
-                for i, p in enumerate(parts):
-                    if "failed" in p:
-                        results["failed"] = int(parts[i - 1])
-                        results["total"] = results["passed"] + results["failed"]
-    except Exception:
-        pass
+    if "PYTEST_CURRENT_TEST" not in os.environ:
+        try:
+            result = subprocess.run(
+                ["python", "-m", "pytest", "tests/", "-q", "--tb=no"],
+                capture_output=True, text=True, timeout=120,
+            )
+            output = result.stdout
+            for line in output.split("\n"):
+                if "passed" in line:
+                    parts = line.split()
+                    for i, p in enumerate(parts):
+                        if "passed" in p:
+                            results["passed"] = int(parts[i - 1])
+                            results["total"] = results["passed"]
+                if "failed" in line:
+                    parts = line.split()
+                    for i, p in enumerate(parts):
+                        if "failed" in p:
+                            results["failed"] = int(parts[i - 1])
+                            results["total"] = results["passed"] + results["failed"]
+        except Exception:
+            pass
 
     try:
         result = subprocess.run(

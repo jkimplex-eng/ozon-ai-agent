@@ -51,13 +51,44 @@ def execute_deploy(
     results = []
     overall_success = True
 
+    deploy_dir = "/root/ozon-ai-agent"
+    venv = f"{deploy_dir}/.venv/bin/activate"
     steps = [
-        ("Pull code", f"cd /root/ollama-bot && git pull origin {branch}"),
-        ("Install dependencies", "cd /root/ollama-bot && npm install"),
-        ("Run tests", "cd /root/ollama-bot && npm test"),
-        ("Health check", "cd /root/ollama-bot && npm run health"),
-        ("Restart PM2", "pm2 restart ollama-bot --update-env"),
-        ("Save PM2", "pm2 save"),
+        (
+            "Pull code",
+            f"cd {deploy_dir} && git fetch origin && git checkout {branch} "
+            f"&& git pull origin {branch}",
+        ),
+        (
+            "Install dependencies",
+            f"cd {deploy_dir} && source {venv} && pip install -e .",
+        ),
+        (
+            "Verify CLI",
+            f"cd {deploy_dir} && source {venv} "
+            "&& python -m ozon_agent.cli --help >/dev/null",
+        ),
+        ("Prepare logs", f"mkdir -p {deploy_dir}/logs"),
+        (
+            "Install supervisor configs",
+            f"cp {deploy_dir}/deploy/supervisor/*.conf /etc/supervisor/conf.d/",
+        ),
+        ("Supervisor reread", "supervisorctl reread"),
+        ("Supervisor update", "supervisorctl update"),
+        (
+            "Restart sheets watcher",
+            "supervisorctl restart ozon-sheets-watch "
+            "|| supervisorctl start ozon-sheets-watch",
+        ),
+        (
+            "Verify sheets watcher",
+            "supervisorctl status ozon-sheets-watch | grep -q RUNNING",
+        ),
+        (
+            "Sheets sync smoke",
+            f"cd {deploy_dir} && source {venv} && SHEETS_DATA_SOURCE=files "
+            "python -m ozon_agent.cli sheets sync --source files --delay 10",
+        ),
     ]
 
     for step_name, command in steps:
@@ -79,9 +110,15 @@ def execute_deploy(
 def execute_health_check(target: str) -> dict[str, Any]:
     """Run health checks on deployed VPS."""
     checks = [
-        ("PM2 status", "pm2 list"),
-        ("Recent logs", "pm2 logs ollama-bot --lines 10 --nostream"),
-        ("HTTP health", "curl -s http://localhost:3000/health || echo HEALTH_FAIL"),
+        ("Supervisor status", "supervisorctl status ozon-sheets-watch"),
+        (
+            "Recent logs",
+            "tail -50 /root/ozon-ai-agent/logs/ozon-sheets-watch.log",
+        ),
+        (
+            "CLI health",
+            "cd /root/ozon-ai-agent && .venv/bin/python -m ozon_agent.cli --help",
+        ),
     ]
 
     results = []
@@ -98,6 +135,5 @@ def execute_health_check(target: str) -> dict[str, Any]:
         "healthy": all_healthy,
         "checks": results,
     }
-
 
 

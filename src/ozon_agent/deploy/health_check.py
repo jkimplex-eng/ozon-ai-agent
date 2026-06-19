@@ -1,7 +1,6 @@
 """Post-deployment health checks."""
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -33,7 +32,8 @@ def check_python_import(target: str) -> dict[str, Any]:
     """Check Python import works."""
     result = run_ssh_command(
         target,
-        "cd /root/ozon-ai-agent && python -c 'import ozon_agent; print(ozon_agent.__version__)'",
+        "cd /root/ozon-ai-agent && source .venv/bin/activate "
+        "&& python -c 'import ozon_agent; print(ozon_agent.__version__)'",
         timeout=15,
     )
     if not result["success"]:
@@ -45,7 +45,8 @@ def check_cli_available(target: str) -> dict[str, Any]:
     """Check CLI is available."""
     result = run_ssh_command(
         target,
-        "cd /root/ozon-ai-agent && ozon-agent --help >/dev/null 2>&1 && echo OK",
+        "cd /root/ozon-ai-agent && source .venv/bin/activate "
+        "&& python -m ozon_agent.cli --help >/dev/null 2>&1 && echo OK",
         timeout=15,
     )
     return {"healthy": result["success"] and "OK" in result["stdout"]}
@@ -58,7 +59,8 @@ def check_dependencies(target: str) -> dict[str, Any]:
     for dep in deps:
         result = run_ssh_command(
             target,
-            f"cd /root/ozon-ai-agent && python -c 'import {dep}' 2>/dev/null",
+            "cd /root/ozon-ai-agent && source .venv/bin/activate "
+            f"&& python -c 'import {dep}' 2>/dev/null",
             timeout=10,
         )
         if not result["success"]:
@@ -81,7 +83,8 @@ def check_env_vars(target: str) -> dict[str, Any]:
     for var in vars_to_check:
         result = run_ssh_command(
             target,
-            f"test -n \"${{${var}:-}}\" && echo OK || echo MISSING",
+            "cd /root/ozon-ai-agent && set -a && [ -f .env ] && . ./.env; "
+            f"set +a; test -n \"${{{var}:-}}\" && echo OK || echo MISSING",
             timeout=10,
         )
         if "MISSING" in result["stdout"] or not result["success"]:
@@ -119,37 +122,24 @@ def check_sheets_sync_dry_run(target: str) -> dict[str, Any]:
     }
 
 
-def check_pm2_status(target: str) -> dict[str, Any]:
-    """Check PM2 process status."""
-    result = run_ssh_command(target, "pm2 jlist", timeout=15)
+def check_supervisor_status(target: str) -> dict[str, Any]:
+    """Check supervisor-managed Ozon services."""
+    result = run_ssh_command(target, "supervisorctl status ozon-sheets-watch", timeout=15)
     if not result["success"]:
         return {"healthy": False, "error": result["stderr"]}
 
-    try:
-        processes = json.loads(result["stdout"])
-        ozon_procs = [
-            p for p in processes
-            if p.get("name", "").startswith("ozon")
-        ]
+    output = result["stdout"].strip()
+    return {
+        "healthy": "RUNNING" in output,
+        "services": {"ozon-sheets-watch": output},
+    }
 
-        if not ozon_procs:
-            return {"healthy": False, "error": "No ozon processes found in PM2"}
 
-        statuses = {}
-        all_online = True
-        for proc in ozon_procs:
-            name = proc.get("name", "unknown")
-            status = proc.get("pm2_env", {}).get("status", "unknown")
-            statuses[name] = status
-            if status != "online":
-                all_online = False
-
-        return {
-            "healthy": all_online,
-            "processes": statuses,
-        }
-    except Exception as e:
-        return {"healthy": False, "error": str(e)}
+def check_sheets_watch_interval(target: str) -> dict[str, Any]:
+    """Verify sheets watcher is configured for a 30-minute interval."""
+    cmd = "grep -q 'sheets watch --interval 30' /etc/supervisor/conf.d/ozon-sheets-watch.conf"
+    result = run_ssh_command(target, cmd, timeout=10)
+    return {"healthy": result["success"]}
 
 
 def check_http_health(target: str, url: str = "http://localhost:3000/health") -> dict[str, Any]:
@@ -167,7 +157,7 @@ def check_http_health(target: str, url: str = "http://localhost:3000/health") ->
 
 def check_logs_errors(target: str, lines: int = 20) -> dict[str, Any]:
     """Check recent logs for errors."""
-    cmd = f"pm2 logs ollama-bot --lines {lines} --nostream 2>&1"
+    cmd = f"tail -{lines} /root/ozon-ai-agent/logs/ozon-sheets-watch.log 2>&1"
     result = run_ssh_command(target, cmd, timeout=15)
     if not result["success"]:
         return {"healthy": False, "error": result["stderr"]}
@@ -192,8 +182,8 @@ def run_full_health_check(target: str) -> dict[str, Any]:
         "dependencies": check_dependencies(target),
         "env_vars": check_env_vars(target),
         "sheets_sync": check_sheets_sync_dry_run(target),
-        "pm2": check_pm2_status(target),
-        "http": check_http_health(target),
+        "supervisor": check_supervisor_status(target),
+        "sheets_watch_interval": check_sheets_watch_interval(target),
         "logs": check_logs_errors(target),
     }
 

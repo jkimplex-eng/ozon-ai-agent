@@ -121,11 +121,11 @@ def evaluate_deploy_readiness(
 
     steps = [
         "git pull origin {branch}",
-        "npm install",
-        "npm test",
-        "npm run health",
-        "pm2 restart ollama-bot --update-env",
-        "pm2 save",
+        "pip install -e .",
+        "python -m ozon_agent.cli --help",
+        "install supervisor configs",
+        "supervisorctl restart ozon-sheets-watch",
+        "supervisorctl status ozon-sheets-watch",
     ]
 
     return DeployDecision(
@@ -146,25 +146,37 @@ def build_deploy_plan(
 ) -> DeployPlan:
     """Build deployment plan from decision."""
     commands = [
-        f"ssh {target} 'cd /root/ollama-bot && git pull origin {branch}'",
-        f"ssh {target} 'cd /root/ollama-bot && npm install'",
-        f"ssh {target} 'cd /root/ollama-bot && npm test'",
-        f"ssh {target} 'cd /root/ollama-bot && npm run health'",
-        f"ssh {target} 'pm2 restart ollama-bot --update-env'",
-        f"ssh {target} 'pm2 save'",
+        f"ssh {target} 'cd /root/ozon-ai-agent && git pull origin {branch}'",
+        f"ssh {target} 'cd /root/ozon-ai-agent && source .venv/bin/activate && pip install -e .'",
+        (
+            f"ssh {target} 'cd /root/ozon-ai-agent && source .venv/bin/activate "
+            "&& python -m ozon_agent.cli --help'"
+        ),
+        f"ssh {target} 'mkdir -p /root/ozon-ai-agent/logs'",
+        f"ssh {target} 'cp /root/ozon-ai-agent/deploy/supervisor/*.conf /etc/supervisor/conf.d/'",
+        f"ssh {target} 'supervisorctl reread && supervisorctl update'",
+        (
+            f"ssh {target} 'supervisorctl restart ozon-sheets-watch "
+            "|| supervisorctl start ozon-sheets-watch'"
+        ),
+        f"ssh {target} 'supervisorctl status ozon-sheets-watch'",
     ]
 
     health_check = [
-        f"ssh {target} 'pm2 list'",
-        f"ssh {target} 'pm2 logs ollama-bot --lines 10 --nostream'",
-        f"ssh {target} 'curl -s http://localhost:3000/health || echo HEALTH_FAIL'",
+        f"ssh {target} 'supervisorctl status ozon-sheets-watch'",
+        (
+            f"ssh {target} 'grep -q \"sheets watch --interval 30\" "
+            "/etc/supervisor/conf.d/ozon-sheets-watch.conf'"
+        ),
+        f"ssh {target} 'tail -50 /root/ozon-ai-agent/logs/ozon-sheets-watch.log'",
     ]
 
     rollback = [
-        f"ssh {target} 'cd /root/ollama-bot && git checkout HEAD~1'",
-        f"ssh {target} 'cd /root/ollama-bot && npm install'",
-        f"ssh {target} 'pm2 restart ollama-bot --update-env'",
-        f"ssh {target} 'pm2 save'",
+        f"ssh {target} 'cd /root/ozon-ai-agent && git checkout HEAD~1'",
+        f"ssh {target} 'cd /root/ozon-ai-agent && source .venv/bin/activate && pip install -e .'",
+        f"ssh {target} 'cp /root/ozon-ai-agent/deploy/supervisor/*.conf /etc/supervisor/conf.d/'",
+        f"ssh {target} 'supervisorctl reread && supervisorctl update'",
+        f"ssh {target} 'supervisorctl restart ozon-sheets-watch'",
     ]
 
     return DeployPlan(

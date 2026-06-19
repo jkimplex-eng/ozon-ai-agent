@@ -3,25 +3,25 @@
 ## Prerequisites
 
 - SSH key auth to VPS
-- pm2 installed on VPS
-- Node.js 18+ on VPS
+- supervisor installed on VPS
+- Python 3.11+ on VPS
 - PostgreSQL accessible from VPS
 
 ## Deploy Commands
 
 ### Dry Run (Default)
 ```bash
-ozon-agent deploy --dry-run --target vps
+ozon-agent deploy vps --target vps --branch main
 ```
 
 ### Execute Deploy
 ```bash
-ozon-agent deploy --target vps --execute
+ozon-agent deploy vps --target vps --branch main --execute
 ```
 
 ### Rollback
 ```bash
-ozon-agent rollback --target vps
+ozon-agent deploy rollback --target vps
 ```
 
 ## Migration
@@ -94,7 +94,7 @@ ozon-agent supervise --task-goal "Phase 5 experiment integration"
 
 ## Health Check
 ```bash
-ssh vps 'pm2 list'
-ssh vps 'pm2 logs ollama-bot --lines 10 --nostream'
-ssh vps 'curl -s http://localhost:3000/health'
+ssh vps 'supervisorctl status ozon-sheets-watch'
+ssh vps 'grep -q "sheets watch --interval 30" /etc/supervisor/conf.d/ozon-sheets-watch.conf'
+ssh vps 'tail -50 /root/ozon-ai-agent/logs/ozon-sheets-watch.log'
 ```

@@ -11,7 +11,7 @@ Local Machine                    VPS
 ┌─────────────────┐     ┌──────────────────────┐
 │ scripts/         │ SSH │ /root/ozon-ai-agent/  │
 │  deploy_vps.sh   │────▶│  pip install -e .     │
-│  verify_vps.sh   │────▶│  pm2 restart ...      │
+│  verify_vps.sh   │────▶│  supervisorctl ...    │
 │  rollback_vps.sh │────▶│  sheets sync ...      │
 └─────────────────┘     └──────────────────────┘
 ```
@@ -54,13 +54,15 @@ ozon-agent deploy rollback --target vps --commits 1
 ### scripts/deploy_vps.sh
 
 Full deployment pipeline:
-1. Pre-flight: lint, mypy, tests
+1. Pre-flight: lint
 2. Push code to origin
 3. Pull on VPS
 4. Install dependencies
-5. Run migrations
-6. Restart services
-7. Health checks (git rev, import, CLI, supervisor, sheets sync, env vars)
+5. Verify CLI
+6. Run Google Sheets sync smoke check
+7. Install supervisor configs
+8. Restart `ozon-sheets-watch`
+9. Health checks (git rev, import, CLI, supervisor, sheets sync, env vars)
 
 Safety:
 - Blocks if `.env` contains service account keys
@@ -75,7 +77,8 @@ Comprehensive verification:
 - CLI availability
 - Dependencies (gspread, apscheduler, pandas, psycopg)
 - Environment variables
-- PM2 process status
+- Supervisor `ozon-sheets-watch` status
+- 30-minute sheets watcher interval
 - Google Sheets sync dry run
 - File permissions
 
@@ -107,11 +110,11 @@ Runs Google Sheets auto-sync every 30 minutes.
 [program:ozon-telegram-bot]
 command=python -m ozon_agent.cli telegram
 directory=/root/ozon-ai-agent
-autostart=true
+autostart=false
 autorestart=true
 ```
 
-Runs Telegram bot for experiment management.
+Telegram bot config is present but does not autostart by default.
 
 ## Health Checks
 
@@ -123,9 +126,9 @@ Runs Telegram bot for experiment management.
 | dependencies | gspread, pandas, psycopg installed |
 | env_vars | DATABASE_URL, GOOGLE_SHEETS_SPREADSHEET_ID set |
 | sheets_sync | Dry run succeeds without FAILED tabs |
-| pm2 | ozon processes are online |
-| http | Health endpoint returns 200 |
-| logs | No fatal errors in recent logs |
+| supervisor | `ozon-sheets-watch` is RUNNING |
+| sheets_watch_interval | Supervisor command uses `--interval 30` |
+| logs | No fatal errors in recent sheets watcher logs |
 
 ## Safety Rules
 
@@ -158,12 +161,16 @@ TELEGRAM_BOT_TOKEN=...
 cd /root
 git clone https://github.com/jkimplex-eng/ozon-ai-agent.git
 cd ozon-ai-agent
+python3.11 -m venv .venv
+. .venv/bin/activate
 pip install -e .
+mkdir -p logs
 
 # Install supervisor configs
 cp deploy/supervisor/*.conf /etc/supervisor/conf.d/
 supervisorctl reread
 supervisorctl update
+supervisorctl start ozon-sheets-watch
 
 # Set env vars in .env (not committed)
 echo "DATABASE_URL=..." >> .env
@@ -186,10 +193,11 @@ ssh vps "cd /root/ozon-ai-agent && pip install -e . --verbose"
 ssh vps "SHEETS_SYNC_DELAY_SECONDS=30 python -m ozon_agent.cli sheets sync --source files"
 ```
 
-### PM2 processes not starting
+### Supervisor service not starting
 ```bash
-ssh vps "pm2 logs ozon-sheets-watch --lines 50"
-ssh vps "pm2 restart ozon-sheets-watch"
+ssh vps "supervisorctl status ozon-sheets-watch"
+ssh vps "tail -50 /root/ozon-ai-agent/logs/ozon-sheets-watch.log"
+ssh vps "supervisorctl restart ozon-sheets-watch"
 ```
 
 ### Rollback needed

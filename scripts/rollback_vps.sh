@@ -51,9 +51,13 @@ ssh "$TARGET" "cd $DEPLOY_DIR && source $VENV && ozon-agent --help >/dev/null 2>
 # Step 5: Supervisor
 log "Step 5: Supervisor..."
 if ssh "$TARGET" "command -v supervisorctl >/dev/null 2>&1"; then
-    ssh "$TARGET" "supervisorctl restart ozon-agent:* 2>/dev/null || true"
-    ssh "$TARGET" "supervisorctl status" || true
-    log "  Supervisor: restarted."
+    ssh "$TARGET" "mkdir -p $DEPLOY_DIR/logs"
+    ssh "$TARGET" "cp $DEPLOY_DIR/deploy/supervisor/*.conf /etc/supervisor/conf.d/"
+    ssh "$TARGET" "supervisorctl reread"
+    ssh "$TARGET" "supervisorctl update"
+    ssh "$TARGET" "supervisorctl restart ozon-sheets-watch 2>/dev/null || supervisorctl start ozon-sheets-watch"
+    ssh "$TARGET" "supervisorctl status ozon-sheets-watch"
+    log "  Supervisor: ozon-sheets-watch restarted."
 else
     log "  WARNING: Supervisor not installed."
 fi

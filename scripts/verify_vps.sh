@@ -73,7 +73,10 @@ echo ""
 
 echo "7. Supervisor"
 if ssh "$TARGET" "command -v supervisorctl >/dev/null 2>&1"; then
-    check "supervisorctl status" ssh "$TARGET" "supervisorctl status"
+    check "supervisorctl status ozon-sheets-watch" \
+        ssh "$TARGET" "supervisorctl status ozon-sheets-watch | grep -q RUNNING"
+    check "ozon-sheets-watch interval 30m" \
+        ssh "$TARGET" "grep -q 'sheets watch --interval 30' /etc/supervisor/conf.d/ozon-sheets-watch.conf"
 else
     warn "Supervisor not installed"
 fi

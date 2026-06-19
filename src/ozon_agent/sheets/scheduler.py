@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import signal
 import threading
+from datetime import UTC, datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -19,6 +20,7 @@ _stop_event = threading.Event()
 def start_watcher(
     interval_minutes: int = 30,
     spreadsheet_id: str | None = None,
+    source: str | None = None,
 ) -> None:
     """Start background sync scheduler.
 
@@ -31,9 +33,10 @@ def start_watcher(
     _scheduler.add_job(
         _run_sync,
         trigger=trigger,
-        kwargs={"spreadsheet_id": spreadsheet_id},
+        kwargs={"spreadsheet_id": spreadsheet_id, "source": source},
         id="sheets_sync",
         name="Google Sheets auto-sync",
+        next_run_time=datetime.now(UTC),
     )
     _scheduler.start()
     logger.info(
@@ -64,10 +67,10 @@ def stop_watcher() -> None:
     logger.info("Sheets watcher stopped")
 
 
-def _run_sync(spreadsheet_id: str | None = None) -> None:
+def _run_sync(spreadsheet_id: str | None = None, source: str | None = None) -> None:
     """Execute a sync cycle."""
     try:
-        results = sync_all(spreadsheet_id)
+        results = sync_all(spreadsheet_id=spreadsheet_id, source=source)
         total = sum(v for v in results.values() if v > 0)
         failed = sum(1 for v in results.values() if v < 0)
         logger.info(

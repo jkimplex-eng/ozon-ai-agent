@@ -66,13 +66,15 @@ ssh "$TARGET" "cd $DEPLOY_DIR && source $VENV && SHEETS_DATA_SOURCE=files python
 log "  Sheets sync done."
 
 # Step 7: Supervisor
-log "Step 7: Checking Supervisor..."
+log "Step 7: Installing and checking Supervisor services..."
 if ssh "$TARGET" "command -v supervisorctl >/dev/null 2>&1"; then
-    ssh "$TARGET" "supervisorctl reread 2>/dev/null || true"
-    ssh "$TARGET" "supervisorctl update 2>/dev/null || true"
-    ssh "$TARGET" "supervisorctl restart ozon-agent:* 2>/dev/null || true"
-    ssh "$TARGET" "supervisorctl status" || true
-    log "  Supervisor: restarted."
+    ssh "$TARGET" "mkdir -p $DEPLOY_DIR/logs"
+    ssh "$TARGET" "cp $DEPLOY_DIR/deploy/supervisor/*.conf /etc/supervisor/conf.d/"
+    ssh "$TARGET" "supervisorctl reread"
+    ssh "$TARGET" "supervisorctl update"
+    ssh "$TARGET" "supervisorctl restart ozon-sheets-watch 2>/dev/null || supervisorctl start ozon-sheets-watch"
+    ssh "$TARGET" "supervisorctl status ozon-sheets-watch"
+    log "  Supervisor: ozon-sheets-watch installed and running."
 else
     log "  WARNING: Supervisor not installed. Services not restarted."
 fi
@@ -99,10 +101,14 @@ ssh "$TARGET" "cd $DEPLOY_DIR && source $VENV && ozon-agent --help >/dev/null 2>
     || { log "  CLI: FAILED"; HEALTH_OK=false; }
 
 for VAR in GOOGLE_SERVICE_ACCOUNT_JSON GOOGLE_SHEETS_SPREADSHEET_ID; do
-    ssh "$TARGET" "test -n \"${VAR:-}\" || echo MISSING" 2>/dev/null \
+    ssh "$TARGET" "cd $DEPLOY_DIR && set -a && [ -f .env ] && . ./.env; set +a; test -n \"\${$VAR:-}\"" 2>/dev/null \
         && log "  Env $VAR: OK ✓" \
         || log "  WARNING: $VAR not set on VPS"
 done
+
+ssh "$TARGET" "supervisorctl status ozon-sheets-watch | grep -q RUNNING" 2>/dev/null \
+    && log "  Supervisor ozon-sheets-watch: RUNNING ✓" \
+    || { log "  Supervisor ozon-sheets-watch: FAILED"; HEALTH_OK=false; }
 
 ssh "$TARGET" "test -f /root/ozon-ai-agent/secrets/google-service-account.json" 2>/dev/null \
     && log "  Secrets file: OK ✓" \

@@ -464,20 +464,11 @@ def deploy_health(target: str) -> None:
         check_dependencies,
         check_env_vars,
         check_git_revision,
-        check_pm2_status,
         check_python_import,
         check_sheets_sync_dry_run,
+        check_sheets_watch_interval,
+        check_supervisor_status,
     )
-
-    checks = [
-        ("Git revision", lambda: check_git_revision(target)),
-        ("Python import", lambda: check_python_import(target)),
-        ("CLI", lambda: check_cli_available(target)),
-        ("Dependencies", lambda: check_dependencies(target)),
-        ("Env vars", lambda: check_env_vars(target)),
-        ("Sheets sync", lambda: check_sheets_sync_dry_run(target)),
-        ("Supervisor", lambda: check_pm2_status(target)),
-    ]
 
     all_ok = True
     check_pairs: list[tuple[str, Any]] = [
@@ -487,7 +478,8 @@ def deploy_health(target: str) -> None:
         ("Dependencies", check_dependencies),
         ("Env vars", check_env_vars),
         ("Sheets sync", check_sheets_sync_dry_run),
-        ("Supervisor", check_pm2_status),
+        ("Supervisor", check_supervisor_status),
+        ("Sheets watch interval", check_sheets_watch_interval),
     ]
 
     for name, check_fn in check_pairs:
@@ -2409,13 +2401,19 @@ def sheets_sync(tab: str | None, source: str | None, delay: int | None) -> None:
 
 @sheets.command("watch")
 @click.option("--interval", default=30, help="Sync interval in minutes")
-def sheets_watch(interval: int) -> None:
+@click.option(
+    "--source",
+    type=click.Choice(["db", "files"]),
+    default=None,
+    help="Data source override",
+)
+def sheets_watch(interval: int, source: str | None) -> None:
     """Start background auto-refresh sync."""
     from .sheets.scheduler import start_watcher
 
     console.print(f"[bold blue]Starting sheets watcher (every {interval} min)...[/]")
     console.print("[yellow]Press Ctrl+C to stop[/]")
-    start_watcher(interval_minutes=interval)
+    start_watcher(interval_minutes=interval, source=source)
 
 
 @sheets.command("status")

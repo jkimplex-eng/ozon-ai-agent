@@ -8,9 +8,10 @@ from ozon_agent.deploy.health_check import (
     check_dependencies,
     check_env_vars,
     check_git_revision,
-    check_pm2_status,
     check_python_import,
     check_sheets_sync_dry_run,
+    check_sheets_watch_interval,
+    check_supervisor_status,
     format_health_report,
     run_full_health_check,
 )
@@ -108,22 +109,33 @@ def test_check_env_vars_missing() -> None:
         assert len(result["missing"]) > 0
 
 
-def test_check_pm2_status_online() -> None:
-    import json
+def test_check_supervisor_status_running() -> None:
     with patch("ozon_agent.deploy.health_check.run_ssh_command") as m:
-        procs = [{"name": "ozon-sheets-watch", "pm2_env": {"status": "online"}}]
-        m.return_value = {"success": True, "stdout": json.dumps(procs), "stderr": ""}
-        result = check_pm2_status("vps")
+        m.return_value = {
+            "success": True,
+            "stdout": "ozon-sheets-watch RUNNING pid 123, uptime 0:01:00\n",
+            "stderr": "",
+        }
+        result = check_supervisor_status("vps")
         assert result["healthy"] is True
 
 
-def test_check_pm2_status_no_ozon() -> None:
-    import json
+def test_check_supervisor_status_stopped() -> None:
     with patch("ozon_agent.deploy.health_check.run_ssh_command") as m:
-        procs = [{"name": "other-app", "pm2_env": {"status": "online"}}]
-        m.return_value = {"success": True, "stdout": json.dumps(procs), "stderr": ""}
-        result = check_pm2_status("vps")
+        m.return_value = {
+            "success": True,
+            "stdout": "ozon-sheets-watch STOPPED Not started\n",
+            "stderr": "",
+        }
+        result = check_supervisor_status("vps")
         assert result["healthy"] is False
+
+
+def test_check_sheets_watch_interval_ok() -> None:
+    with patch("ozon_agent.deploy.health_check.run_ssh_command") as m:
+        m.return_value = {"success": True, "stdout": "", "stderr": ""}
+        result = check_sheets_watch_interval("vps")
+        assert result["healthy"] is True
 
 
 def test_check_sheets_sync_ok() -> None:
@@ -151,8 +163,8 @@ def _mock_all() -> list:
         "check_dependencies": OK,
         "check_env_vars": OK,
         "check_sheets_sync_dry_run": OK,
-        "check_pm2_status": OK,
-        "check_http_health": OK,
+        "check_supervisor_status": OK,
+        "check_sheets_watch_interval": OK,
         "check_logs_errors": OK,
     }
     patches = []

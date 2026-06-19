@@ -55,7 +55,8 @@ def test_deploy_health_all_ok() -> None:
          patch("ozon_agent.deploy.health_check.check_dependencies", return_value=ok), \
          patch("ozon_agent.deploy.health_check.check_env_vars", return_value=ok), \
          patch("ozon_agent.deploy.health_check.check_sheets_sync_dry_run", return_value=ok), \
-         patch("ozon_agent.deploy.health_check.check_pm2_status", return_value=ok):
+         patch("ozon_agent.deploy.health_check.check_supervisor_status", return_value=ok), \
+         patch("ozon_agent.deploy.health_check.check_sheets_watch_interval", return_value=ok):
         result = runner.invoke(main, ["deploy", "health"])
         assert result.exit_code == 0
         assert "All checks passed" in result.output
@@ -71,7 +72,8 @@ def test_deploy_health_some_fail() -> None:
          patch("ozon_agent.deploy.health_check.check_dependencies", return_value=ok), \
          patch("ozon_agent.deploy.health_check.check_env_vars", return_value=ok), \
          patch("ozon_agent.deploy.health_check.check_sheets_sync_dry_run", return_value=ok), \
-         patch("ozon_agent.deploy.health_check.check_pm2_status", return_value=ok):
+         patch("ozon_agent.deploy.health_check.check_supervisor_status", return_value=ok), \
+         patch("ozon_agent.deploy.health_check.check_sheets_watch_interval", return_value=ok):
         result = runner.invoke(main, ["deploy", "health"])
         assert result.exit_code == 0
         assert "FAIL" in result.output
@@ -90,7 +92,8 @@ def test_deploy_health_handles_exception() -> None:
          patch("ozon_agent.deploy.health_check.check_dependencies", return_value=ok), \
          patch("ozon_agent.deploy.health_check.check_env_vars", return_value=ok), \
          patch("ozon_agent.deploy.health_check.check_sheets_sync_dry_run", return_value=ok), \
-         patch("ozon_agent.deploy.health_check.check_pm2_status", return_value=ok):
+         patch("ozon_agent.deploy.health_check.check_supervisor_status", return_value=ok), \
+         patch("ozon_agent.deploy.health_check.check_sheets_watch_interval", return_value=ok):
         result = runner.invoke(main, ["deploy", "health"])
         assert result.exit_code == 0
         assert "WARNING" in result.output
@@ -111,6 +114,8 @@ def test_supervisor_config_uses_venv() -> None:
         content = f.read()
     assert ".venv/bin/python" in content
     assert "autostart=true" in content
+    assert "sheets watch --interval 30" in content
+    assert "--source files" not in content
 
 
 def test_supervisor_telegram_config_autostart_false() -> None:
