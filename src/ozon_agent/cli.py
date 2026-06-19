@@ -365,12 +365,17 @@ def supervise(builder: str, task_goal: str, output: str | None) -> None:
         console.print(format_report_text(report))
 
 
-@main.command()
+@main.group("deploy")
+def deploy_group() -> None:
+    """VPS deployment commands."""
+
+
+@deploy_group.command("vps")
 @click.option("--target", "-t", default="vps", help="Deployment target (SSH host)")
 @click.option("--branch", "-b", default="main", help="Git branch to deploy")
 @click.option("--execute", is_flag=True, default=False, help="Execute deployment")
 @click.option("--output", "-o", default=None, help="Output file path (JSON)")
-def deploy(target: str, branch: str, execute: bool, output: str | None) -> None:
+def deploy_vps(target: str, branch: str, execute: bool, output: str | None) -> None:
     """Deploy to VPS after supervisor checks."""
     import json
 
@@ -427,23 +432,35 @@ def deploy(target: str, branch: str, execute: bool, output: str | None) -> None:
                 if not check["healthy"]:
                     console.print(f"  {name}: {check.get('error', 'failed')}")
             console.print("\n[bold yellow]Rollback command:[/]")
-            console.print(f"  ozon-agent rollback --target {target}")
+            console.print(f"  ozon-agent deploy rollback --target {target}")
     else:
         console.print("[bold red]Deployment FAILED![/]")
         for step in deploy_result["steps"]:
             if not step["success"]:
                 console.print(f"  Failed: {step['step']} — {step['stderr']}")
         console.print("\n[bold yellow]Rollback command:[/]")
-        console.print(f"  ozon-agent rollback --target {target}")
+        console.print(f"  ozon-agent deploy rollback --target {target}")
 
 
-@main.command()
+@deploy_group.command("verify")
 @click.option("--target", "-t", default="vps", help="Deployment target (SSH host)")
-def rollback(target: str) -> None:
+def deploy_verify(target: str) -> None:
+    """Verify deployment health on VPS."""
+    from .deploy.health_check import format_health_report, run_full_health_check
+
+    console.print(f"[bold blue]Running health checks on {target}...[/]")
+    result = run_full_health_check(target)
+    console.print(format_health_report(result))
+
+
+@deploy_group.command("rollback")
+@click.option("--target", "-t", default="vps", help="Deployment target (SSH host)")
+@click.option("--commits", "-c", default=1, help="Number of commits to roll back")
+def deploy_rollback(target: str, commits: int) -> None:
     """Rollback to previous commit on VPS."""
     from .deploy.rollback import execute_rollback, format_rollback_text
 
-    console.print(f"[bold yellow]Rolling back on {target}...[/]")
+    console.print(f"[bold yellow]Rolling back on {target} ({commits} commit(s))...[/]")
     console.print(format_rollback_text(target))
 
     result = execute_rollback(target)
