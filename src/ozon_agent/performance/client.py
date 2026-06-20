@@ -44,6 +44,7 @@ class PerformanceClient:
             timeout=timeout_seconds,
             follow_redirects=True,
         )
+        self._access_token: str | None = None
 
     @classmethod
     def from_env(cls) -> PerformanceClient:
@@ -56,11 +57,34 @@ class PerformanceClient:
             )
         )
 
+    def _ensure_token(self) -> str:
+        if self._access_token:
+            return self._access_token
+        response = self._client.post(
+            "/api/client/token",
+            json={
+                "client_id": self.credentials.client_id,
+                "client_secret": self.credentials.client_secret,
+                "grant_type": "client_credentials",
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        response.raise_for_status()
+        body: dict[str, Any] = response.json()
+        token_raw: Any = body.get("access_token", "")
+        token: str = str(token_raw) if token_raw else ""
+        if not token:
+            raise PerformanceCredentialsError(
+                "Failed to obtain access token from Performance API"
+            )
+        self._access_token = token
+        logger.info("Obtained Performance API access token")
+        return token
+
     def _auth_headers(self) -> dict[str, str]:
+        token = self._ensure_token()
         return {
-            "Authorization": (
-                f"Bearer {self.credentials.client_secret}"
-            ),
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
 
@@ -166,45 +190,44 @@ class PerformanceClient:
     def parse_campaigns_response(
         self, data: dict[str, Any]
     ) -> PerformanceCampaignsResult:
-        result_data = data.get("result", data)
-        campaigns_raw = result_data.get("list", [])
-        pagination = result_data.get("pagination", {})
+        campaigns_raw = data.get("list", [])
+        pagination = data.get("pagination", {})
         campaigns: list[PerformanceCampaign] = []
         for item in campaigns_raw:
             campaigns.append(
                 PerformanceCampaign(
                     id=int(item.get("id", 0)),
                     name=str(item.get("title", "")),
-                    status=str(item.get("status", "")),
-                    campaign_type=str(item.get("type", "")),
+                    status=str(item.get("state", "")),
+                    campaign_type=str(item.get("advObjectType", "")),
                     budget=float(item.get("budget", 0) or 0),
                     daily_budget=float(
-                        item.get("daily_budget", 0) or 0
+                        item.get("dailyBudget", 0) or 0
                     ),
-                    start_date=str(item.get("start_date", "")),
-                    end_date=str(item.get("end_date", "")),
+                    start_date=str(item.get("fromDate", "")),
+                    end_date=str(item.get("toDate", "")),
                 )
             )
         return PerformanceCampaignsResult(
             campaigns=campaigns,
             raw_response=data,
             page=int(pagination.get("page", 1)),
-            total_pages=int(pagination.get("total_pages", 1)),
+            total_pages=int(pagination.get("totalPages", 1)),
         )
 
     def create_stats_report(
         self,
         request: PerformanceReportRequest,
     ) -> dict[str, Any]:
+        campaign_ids = [str(cid) for cid in request.campaign_ids]
         payload: dict[str, Any] = {
-            "date_from": request.date_from,
-            "date_to": request.date_to,
-            "limit": request.limit,
+            "campaigns": campaign_ids,
+            "dateFrom": request.date_from,
+            "dateTo": request.date_to,
+            "groupBy": "DATE",
         }
-        if request.campaign_ids:
-            payload["campaign_ids"] = request.campaign_ids
         response = self._post(
-            "/api/client/statistics/report",
+            "/api/client/statistics",
             json_data=payload,
         )
         response.raise_for_status()
@@ -213,18 +236,29 @@ class PerformanceClient:
 
     def get_report_status(self, report_id: str) -> dict[str, Any]:
         response = self._get(
-            f"/api/client/statistics/report/{report_id}",
+            f"/api/client/statistics/{report_id}",
         )
         body: dict[str, Any] = response.json()
         return body
 
     def download_report_csv(self, report_id: str) -> str:
-        response = self._get(
-            f"/api/client/statistics/report/download/{report_id}",
-        )
-        response.raise_for_status()
-        result: str = response.text
-        return result
+        body = self.get_report_status(report_id)
+        state = body.get("state", "")
+        if state == "OK":
+            rows = body.get("report", {}).get("rows", [])
+            if rows:
+                return self._rows_to_csv(rows)
+        return ""
+
+    def _rows_to_csv(self, rows: list[dict[str, Any]]) -> str:
+        if not rows:
+            return ""
+        headers = list(rows[0].keys())
+        lines = [";".join(headers)]
+        for row in rows:
+            values = [str(row.get(h, "")) for h in headers]
+            lines.append(";".join(values))
+        return "\n".join(lines)
 
     def poll_report_until_done(
         self,
@@ -236,24 +270,16 @@ class PerformanceClient:
         elapsed = 0.0
         while elapsed < timeout:
             body = self.get_report_status(report_id)
-            result_data = body.get("result", body)
-            status_str = str(
-                result_data.get("status", "")
-            ).upper()
-            try:
-                status = PerformanceReportStatus(status_str)
-            except ValueError:
-                status = PerformanceReportStatus.PENDING
-
-            if status == PerformanceReportStatus.DONE:
-                return status
-            if status == PerformanceReportStatus.FAILED:
-                return status
+            state = str(body.get("state", "")).upper()
+            if state == "OK":
+                return PerformanceReportStatus.DONE
+            if state == "ERROR":
+                return PerformanceReportStatus.FAILED
 
             logger.info(
-                "Report %s status: %s, waiting %.0fs...",
+                "Report %s state: %s, waiting %.0fs...",
                 report_id,
-                status_str,
+                state,
                 poll_interval,
             )
             time.sleep(poll_interval)

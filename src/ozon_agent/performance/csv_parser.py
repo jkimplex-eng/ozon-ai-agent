@@ -9,31 +9,31 @@ from ozon_agent.performance.models import PerformanceStatsRow
 logger = logging.getLogger(__name__)
 
 COLUMN_MAP = {
-    "Дата": "date",
-    "ID кампании": "campaign_id",
-    "Название кампании": "campaign_name",
-    "Артикул": "sku",
+    "День": "date",
+    "sku": "sku",
     "Название товара": "product_name",
+    "Цена товара, ₽": "unit_price",
     "Показы": "impressions",
     "Клики": "clicks",
-    "CTR": "ctr",
+    "CTR, %": "ctr",
     "Добавления в корзину": "add_to_cart",
-    "CPC": "cpc",
-    "Расход": "spend",
-    "Заказы": "orders",
-    "Выручка": "revenue",
-    "Заказы (мод.)": "model_orders",
-    "Выручка (мод.)": "model_revenue",
-    "ДРР": "drr",
-    "Заказанное кол-во": "ordered_amount",
-    "Общий ДРР": "total_drr",
-    "Добавлено": "added_at",
+    "Средняя стоимость клика, ₽": "cpc",
+    "Расход, ₽, с НДС": "spend",
+    "Продано товаров": "orders",
+    "Продажи в продвижении, ₽": "revenue",
+    "Продано товаров модели": "model_orders",
+    "Продажи в продвижении с заказов модели, ₽": "model_revenue",
+    "ДРР в продвижении, %": "drr",
+    "Заказано на сумму, ₽": "ordered_amount",
+    "ДРР (общий), %": "total_drr",
+    "Дата добавления": "added_at",
 }
 
 
 def _safe_int(value: str) -> int:
+    cleaned = value.replace("\xa0", "").replace(" ", "").replace(",", ".").strip()
     try:
-        return int(value.replace("\xa0", "").replace(" ", "").replace(",", ".").strip())
+        return int(float(cleaned))
     except (ValueError, TypeError):
         return 0
 
@@ -50,7 +50,21 @@ def parse_performance_csv(csv_text: str) -> list[PerformanceStatsRow]:
     if not csv_text or not csv_text.strip():
         return []
 
-    reader = csv.DictReader(io.StringIO(csv_text), delimiter=";")
+    lines = csv_text.strip().split("\n")
+    header_idx = -1
+    for i, line in enumerate(lines):
+        if "sku" in line.lower() or "день" in line.lower():
+            header_idx = i
+            break
+
+    if header_idx < 0:
+        return []
+
+    header_line = lines[header_idx]
+    reader = csv.DictReader(
+        io.StringIO(header_line + "\n" + "\n".join(lines[header_idx + 1:])),
+        delimiter=";",
+    )
     if reader.fieldnames is None:
         return []
 
@@ -69,8 +83,8 @@ def parse_performance_csv(csv_text: str) -> list[PerformanceStatsRow]:
 
         row = PerformanceStatsRow(
             date=mapped.get("date", ""),
-            campaign_id=mapped.get("campaign_id", ""),
-            campaign_name=mapped.get("campaign_name", ""),
+            campaign_id="",
+            campaign_name="",
             sku=mapped.get("sku", ""),
             product_name=mapped.get("product_name", ""),
             impressions=_safe_int(mapped.get("impressions", "0")),
