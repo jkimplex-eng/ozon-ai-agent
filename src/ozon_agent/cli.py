@@ -2343,7 +2343,7 @@ def sheets() -> None:
 @sheets.command("setup")
 @click.option("--title", default="Ozon AI Agent", help="Spreadsheet title")
 def sheets_setup(title: str) -> None:
-    """Create a new Google Spreadsheet with all 8 tabs."""
+    """Create a new Google Spreadsheet with all configured tabs."""
     from .sheets.setup import setup_spreadsheet
 
     console.print(f"[bold blue]Creating spreadsheet: {title}...[/]")

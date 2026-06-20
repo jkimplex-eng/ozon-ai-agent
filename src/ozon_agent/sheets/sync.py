@@ -9,6 +9,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import gspread
+from gspread.exceptions import WorksheetNotFound
+
 from ozon_agent.db.connection import is_db_available
 from ozon_agent.sheets.client import (
     get_gspread_client,
@@ -25,6 +28,7 @@ from ozon_agent.sheets.exporters.experiments import export_experiments
 from ozon_agent.sheets.exporters.ingestion_status import export_ingestion_status
 from ozon_agent.sheets.exporters.market_insights import export_market_insights
 from ozon_agent.sheets.exporters.memory import export_memory
+from ozon_agent.sheets.exporters.performance_stats import export_performance_stats
 from ozon_agent.sheets.exporters.products import export_products
 from ozon_agent.sheets.exporters.recommendations import export_recommendations
 from ozon_agent.sheets.exporters.stocks import export_stocks
@@ -40,6 +44,7 @@ TAB_EXPORTERS: dict[str, Any] = {
     "Recommendation Memory": export_memory,
     "Ingestion Status": export_ingestion_status,
     "Approvals": export_approvals,
+    "Performance Stats": export_performance_stats,
     "Products": export_products,
     "Stocks": export_stocks,
     "Daily Summary": export_daily_summary,
@@ -100,6 +105,53 @@ def _get_delay(delay: int | None) -> int:
     return 10
 
 
+def _get_tab_columns(tab_name: str) -> list[str]:
+    from ozon_agent.sheets.setup import TABS
+
+    for tab_config in TABS:
+        if tab_config["name"] == tab_name:
+            return list(tab_config["columns"])
+    return []
+
+
+def _create_missing_worksheet(
+    spreadsheet: gspread.Spreadsheet,
+    tab_name: str,
+) -> gspread.Worksheet:
+    from ozon_agent.sheets.format import (
+        add_auto_filter,
+        apply_header_format,
+        auto_resize_columns,
+        freeze_header,
+    )
+
+    columns = _get_tab_columns(tab_name)
+    worksheet = spreadsheet.add_worksheet(
+        title=tab_name,
+        rows=1000,
+        cols=max(len(columns), 1),
+    )
+    if columns:
+        worksheet.update("A1", [columns])  # type: ignore[arg-type]
+        num_cols = len(columns)
+        apply_header_format(worksheet, num_cols)
+        freeze_header(worksheet)
+        auto_resize_columns(worksheet)
+        add_auto_filter(worksheet, num_cols)
+    logger.info("Created missing worksheet: %s", tab_name)
+    return worksheet
+
+
+def _get_or_create_worksheet(
+    spreadsheet: gspread.Spreadsheet,
+    tab_name: str,
+) -> gspread.Worksheet:
+    try:
+        return spreadsheet.worksheet(tab_name)
+    except WorksheetNotFound:
+        return _create_missing_worksheet(spreadsheet, tab_name)
+
+
 def _sync_one_tab(
     tab_name: str,
     exporter: Any,
@@ -113,7 +165,7 @@ def _sync_one_tab(
     Returns row count or -1 on failure.
     """
     try:
-        ws = spreadsheet.worksheet(tab_name)
+        ws = _get_or_create_worksheet(spreadsheet, tab_name)
 
         def _do_write() -> int:
             return int(exporter(ws, use_files=use_files))
@@ -180,7 +232,7 @@ def sync_tab(
 
     client = get_gspread_client()
     spreadsheet = open_spreadsheet(client, spreadsheet_id)
-    ws = spreadsheet.worksheet(tab_name)
+    ws = _get_or_create_worksheet(spreadsheet, tab_name)
 
     def _do_write() -> int:
         return int(exporter(ws, use_files=use_files))

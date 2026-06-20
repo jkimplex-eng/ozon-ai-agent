@@ -4,6 +4,7 @@ Provides fallback data readers when PostgreSQL is unavailable.
 Reads from:
 - data/live_ozon/normalized/ (products, sales, advertising CSV/JSON)
 - data/market_knowledge/ (snapshots, insights)
+- data/performance/normalized/ (Performance API stats)
 - data/experiments/ (experiments, outcomes, hypotheses)
 - data/recommendation_memory/ (records, insights)
 """
@@ -21,6 +22,7 @@ DATA_ROOT = Path("data")
 LIVE_OZON_DIR = DATA_ROOT / "live_ozon" / "normalized"
 MARKET_KNOWLEDGE_DIR = DATA_ROOT / "market_knowledge"
 EXPERIMENTS_DIR = DATA_ROOT / "experiments"
+PERFORMANCE_DIR = DATA_ROOT / "performance" / "normalized"
 MEMORY_DIR = DATA_ROOT / "recommendation_memory"
 
 
@@ -54,6 +56,32 @@ def _read_json_files(directory: Path) -> list[dict[str, Any]]:
         except Exception as e:
             logger.warning("Failed to read %s: %s", json_path, e)
     return rows
+
+
+def _read_latest_json_rows(directory: Path) -> list[dict[str, Any]]:
+    """Read rows from the newest JSON file in a directory."""
+    if not directory.exists():
+        return []
+
+    json_files = sorted(
+        directory.glob("*.json"),
+        key=lambda json_path: json_path.stat().st_mtime,
+        reverse=True,
+    )
+    if not json_files:
+        return []
+
+    latest_path = json_files[0]
+    try:
+        data = json.loads(latest_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("Failed to read %s: %s", latest_path, e)
+        return []
+
+    rows = data.get("rows") if isinstance(data, dict) else data
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict)]
 
 
 def _read_nested_json(root: Path, subfolder: str) -> list[dict[str, Any]]:
@@ -127,6 +155,11 @@ def load_memory_insights() -> list[dict[str, Any]]:
     return _read_nested_json(MEMORY_DIR, "insights")
 
 
+def load_performance_stats() -> list[dict[str, Any]]:
+    """Load rows from the latest normalized Performance API stats file."""
+    return _read_latest_json_rows(PERFORMANCE_DIR / "stats")
+
+
 def has_any_file_data() -> bool:
     """Check if any file-based data exists."""
     for loader in (
@@ -135,4 +168,4 @@ def has_any_file_data() -> bool:
     ):
         if loader():
             return True
-    return False
+    return bool(load_performance_stats())

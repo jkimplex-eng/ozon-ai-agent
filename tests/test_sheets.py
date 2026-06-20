@@ -1,6 +1,8 @@
 """Tests for Google Sheets module."""
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from ozon_agent.sheets.format import _col_letter
@@ -40,16 +42,17 @@ def test_tabs_names() -> None:
     assert "Recommendation Memory" in names
     assert "Ingestion Status" in names
     assert "Approvals" in names
+    assert "Performance Stats" in names
 
 
 def test_tabs_count() -> None:
-    assert len(TABS) == 8
+    assert len(TABS) == 14
 
 
-def test_get_sync_status_empty() -> None:
-    from ozon_agent.sheets.sync import _SYNC_STATUS_FILE
-    if _SYNC_STATUS_FILE.exists():
-        _SYNC_STATUS_FILE.unlink()
+def test_get_sync_status_empty(tmp_path: Path, monkeypatch: Any) -> None:
+    from ozon_agent.sheets import sync as sync_module
+
+    monkeypatch.setattr(sync_module, "_SYNC_STATUS_FILE", tmp_path / "sync.json")
     status = get_sync_status()
     assert isinstance(status, dict)
     assert len(status) == 0
@@ -69,7 +72,12 @@ def test_sync_tab_known(
     mock_client: MagicMock,
     mock_open: MagicMock,
     mock_db: MagicMock,
+    tmp_path: Path,
+    monkeypatch: Any,
 ) -> None:
+    from ozon_agent.sheets import sync as sync_module
+
+    monkeypatch.setattr(sync_module, "_SYNC_STATUS_FILE", tmp_path / "sync.json")
     mock_ws = MagicMock()
     mock_sheet = MagicMock()
     mock_sheet.worksheet.return_value = mock_ws
@@ -83,10 +91,49 @@ def test_sync_tab_known(
         assert count == 5
 
 
-def test_sync_all_requires_google_auth() -> None:
+@patch("ozon_agent.sheets.sync.get_gspread_client", side_effect=OSError("auth missing"))
+def test_sync_all_requires_google_auth(mock_client: MagicMock) -> None:
     import pytest
 
     from ozon_agent.sheets.sync import sync_all
 
-    with pytest.raises((OSError, Exception)):
+    with pytest.raises(OSError, match="auth missing"):
         sync_all()
+
+
+@patch("ozon_agent.sheets.sync.is_db_available", return_value=False)
+@patch("ozon_agent.sheets.sync.open_spreadsheet")
+@patch("ozon_agent.sheets.sync.get_gspread_client")
+def test_sync_tab_creates_missing_worksheet(
+    mock_client: MagicMock,
+    mock_open: MagicMock,
+    mock_db: MagicMock,
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    from gspread.exceptions import WorksheetNotFound
+
+    from ozon_agent.sheets import sync as sync_module
+
+    monkeypatch.setattr(sync_module, "_SYNC_STATUS_FILE", tmp_path / "sync.json")
+    mock_ws = MagicMock()
+    mock_sheet = MagicMock()
+    mock_sheet.worksheet.side_effect = WorksheetNotFound("Missing Tab")
+    mock_sheet.add_worksheet.return_value = mock_ws
+    mock_open.return_value = mock_sheet
+
+    def fake_exporter(ws: MagicMock, *, use_files: bool = False) -> int:
+        assert ws is mock_ws
+        return 1
+
+    with (
+        patch("ozon_agent.sheets.sync.TAB_EXPORTERS", {"Performance Stats": fake_exporter}),
+        patch("ozon_agent.sheets.format.apply_header_format"),
+        patch("ozon_agent.sheets.format.freeze_header"),
+        patch("ozon_agent.sheets.format.auto_resize_columns"),
+        patch("ozon_agent.sheets.format.add_auto_filter"),
+    ):
+        count = sync_tab("Performance Stats", source="files")
+
+    assert count == 1
+    mock_sheet.add_worksheet.assert_called_once()
