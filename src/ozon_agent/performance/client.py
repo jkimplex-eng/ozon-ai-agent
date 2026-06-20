@@ -42,6 +42,7 @@ class PerformanceClient:
         self._client = http_client or httpx.Client(
             base_url=base_url,
             timeout=timeout_seconds,
+            follow_redirects=True,
         )
 
     @classmethod
