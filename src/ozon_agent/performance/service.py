@@ -110,7 +110,11 @@ def fetch_stats(
 
         body = active_client.create_stats_report(request)
         result_data = body.get("result", body)
-        report_id = str(result_data.get("report_id", result_data.get("id", "")))
+        report_id = str(
+            body.get("UUID", "")
+            or result_data.get("report_id", "")
+            or result_data.get("id", "")
+        )
 
         status = active_client.poll_report_until_done(
             report_id,
