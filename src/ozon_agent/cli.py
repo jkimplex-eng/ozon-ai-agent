@@ -2550,5 +2550,182 @@ def cogs_clear() -> None:
     console.print(f"[yellow]Cleared {count} COGS entries.[/]")
 
 
+@main.group()
+def performance() -> None:
+    """Read-only Ozon Performance API commands."""
+
+
+@performance.command("campaigns")
+@click.option("--max-pages", default=1, help="Max pages to fetch")
+@click.option("--page-delay", default=0.0, help="Delay between pages in seconds")
+@click.option("--dry-run", is_flag=True, help="Build request without calling API")
+def performance_campaigns(max_pages: int, page_delay: float, dry_run: bool) -> None:
+    """Fetch read-only campaign list from Performance API."""
+    from .performance.service import fetch_campaigns
+
+    try:
+        result = fetch_campaigns(
+            max_pages=max_pages,
+            page_delay=page_delay,
+            dry_run=dry_run,
+        )
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    table = Table(title="Performance Campaigns")
+    table.add_column("ID")
+    table.add_column("Name")
+    table.add_column("Status")
+    table.add_column("Type")
+    for campaign in result.campaigns:
+        table.add_row(
+            str(campaign.id),
+            campaign.name,
+            campaign.status,
+            campaign.campaign_type,
+        )
+    console.print(table)
+    console.print(f"[green]Total: {len(result.campaigns)} campaigns[/]")
+    for warning in result.warnings:
+        console.print(f"[yellow]{escape(warning)}[/]")
+
+
+@performance.command("stats")
+@click.option("--date-from", required=True, help="Date from, YYYY-MM-DD")
+@click.option("--date-to", required=True, help="Date to, YYYY-MM-DD")
+@click.option("--campaign-id", default=None, help="Filter by campaign ID")
+@click.option("--max-campaigns", default=1, help="Max campaigns to include")
+@click.option("--poll-interval", default=60.0, help="Poll interval in seconds")
+@click.option("--timeout", default=900.0, help="Total timeout in seconds")
+@click.option("--dry-run", is_flag=True, help="Build request without calling API")
+def performance_stats(
+    date_from: str,
+    date_to: str,
+    campaign_id: str | None,
+    max_campaigns: int,
+    poll_interval: float,
+    timeout: float,
+    dry_run: bool,
+) -> None:
+    """Create and fetch a Performance Stats report."""
+    from .performance.models import PerformanceReportRequest
+    from .performance.service import fetch_stats
+
+    campaign_ids: list[int] = []
+    if campaign_id:
+        try:
+            campaign_ids = [int(campaign_id)]
+        except ValueError:
+            raise click.ClickException(f"Invalid campaign ID: {campaign_id}")
+
+    if max_campaigns > 0 and not campaign_ids:
+        from .performance.client import PerformanceClient
+
+        try:
+            client = PerformanceClient.from_env()
+            page_data = client.get_campaigns_page(page=1, page_size=max_campaigns)
+            parsed = client.parse_campaigns_response(page_data)
+            campaign_ids = [c.id for c in parsed.campaigns[:max_campaigns]]
+            client.close()
+        except Exception as exc:
+            console.print(f"[yellow]Could not fetch campaigns: {exc}[/]")
+
+    request = PerformanceReportRequest(
+        date_from=date_from,
+        date_to=date_to,
+        campaign_ids=campaign_ids,
+    )
+
+    try:
+        result = fetch_stats(
+            request,
+            poll_interval=poll_interval,
+            timeout=timeout,
+            dry_run=dry_run,
+        )
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    table = Table(title="Performance Stats Report")
+    table.add_column("Metric")
+    table.add_column("Value")
+    table.add_row("Report ID", result.report_id)
+    table.add_row("Status", result.status.value)
+    table.add_row("Rows", str(len(result.rows)))
+    console.print(table)
+    for warning in result.warnings:
+        console.print(f"[yellow]{escape(warning)}[/]")
+
+    if result.rows:
+        stats_table = Table(title="Stats Preview")
+        stats_table.add_column("Date")
+        stats_table.add_column("SKU")
+        stats_table.add_column("Spend")
+        stats_table.add_column("Orders")
+        stats_table.add_column("DRR")
+        for row in result.rows[:20]:
+            stats_table.add_row(
+                row.date,
+                row.sku,
+                f"{row.spend:.2f}",
+                str(row.orders),
+                f"{row.drr:.2f}",
+            )
+        console.print(stats_table)
+
+
+@performance.command("reports")
+def performance_reports() -> None:
+    """List locally saved performance stats report files."""
+    from .performance.store import list_normalized_stats_files
+
+    files = list_normalized_stats_files()
+    table = Table(title="Local Performance Stats Reports")
+    table.add_column("File")
+    table.add_column("Size")
+    table.add_column("Modified")
+    for path in files:
+        stat = path.stat()
+        table.add_row(
+            path.name,
+            f"{stat.st_size / 1024:.1f} KB",
+            f"{stat.st_mtime:.0f}",
+        )
+    console.print(table)
+
+
+@performance.command("report-status")
+@click.argument("report_id")
+@click.option("--download", is_flag=True, help="Download completed report")
+def performance_report_status(report_id: str, download: bool) -> None:
+    """Check status of a Performance Stats report."""
+    from .performance.client import PerformanceClient
+
+    try:
+        client = PerformanceClient.from_env()
+        body = client.get_report_status(report_id)
+        result_data = body.get("result", body)
+        status_str = str(result_data.get("status", "UNKNOWN"))
+        client.close()
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    table = Table(title=f"Report Status: {report_id}")
+    table.add_column("Metric")
+    table.add_column("Value")
+    table.add_row("Report ID", report_id)
+    table.add_row("Status", status_str)
+    console.print(table)
+
+    if download and status_str.upper() == "DONE":
+        from .performance.service import download_report
+
+        try:
+            result = download_report(report_id)
+            console.print(f"[green]Downloaded {len(result.rows)} rows[/]")
+        except Exception as exc:
+            raise click.ClickException(str(exc)) from exc
+
+
 if __name__ == "__main__":
     main()
