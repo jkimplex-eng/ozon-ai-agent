@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 
-PERFORMANCE_BASE_URL = "https://performance.ozon.ru"
+PERFORMANCE_BASE_URL = "https://api-performance.ozon.ru"
 CAMPAIGN_ENDPOINT = "/api/client/campaign"
 STATS_REPORT_ENDPOINT = "/api/client/statistics/report"
 STATS_DOWNLOAD_ENDPOINT = "/api/client/statistics/report/download"
