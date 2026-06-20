@@ -82,11 +82,48 @@ TABS: list[dict[str, Any]] = [
         ],
         "status_col": 2,
     },
+    {
+        "name": "Products",
+        "columns": ["Name", "SKU", "Offer ID", "Price", "Stock"],
+        "status_col": None,
+    },
+    {
+        "name": "Stocks",
+        "columns": ["Name", "SKU", "Offer ID", "Stock"],
+        "status_col": None,
+    },
+    {
+        "name": "Daily Summary",
+        "columns": [
+            "Date", "Revenue", "Payout", "Orders", "Commission",
+            "Logistics", "Advertising", "COGS", "Profit", "Margin", "DRR",
+        ],
+        "status_col": None,
+    },
+    {
+        "name": "Daily Control",
+        "columns": [
+            "Date", "Day", "Orders", "Revenue", "Advertising", "COGS",
+            "Logistics", "Gross Profit", "Margin", "Plan VP", "Deviation",
+            "Cumulative VP", "Run Rate", "Status", "Comment",
+        ],
+        "status_col": None,
+    },
+    {
+        "name": "Daily Input",
+        "columns": [
+            "Date", "Day", "Orders", "Revenue", "Commission", "Advertising",
+            "COGS", "Logistics", "Partner Services", "FBO Services",
+            "Gross Profit", "Margin", "Plan VP", "Deviation",
+            "Cumulative VP", "Run Rate", "Status", "Comment",
+        ],
+        "status_col": None,
+    },
 ]
 
 
 def setup_spreadsheet(title: str = "Ozon AI Agent") -> str:
-    """Create a new spreadsheet with all 8 tabs. Returns spreadsheet ID."""
+    """Create a new spreadsheet with all tabs. Returns spreadsheet ID."""
     client = get_gspread_client()
     spreadsheet = create_sheet(client, title)
 
@@ -129,5 +166,10 @@ def _tab_color(tab_name: str) -> dict[str, float]:
         "Recommendation Memory": {"red": 0.3, "green": 0.5, "blue": 0.7},
         "Ingestion Status": {"red": 0.5, "green": 0.5, "blue": 0.5},
         "Approvals": {"red": 0.1, "green": 0.5, "blue": 0.5},
+        "Products": {"red": 0.2, "green": 0.6, "blue": 0.2},
+        "Stocks": {"red": 0.3, "green": 0.5, "blue": 0.3},
+        "Daily Summary": {"red": 0.1, "green": 0.5, "blue": 0.7},
+        "Daily Control": {"red": 0.8, "green": 0.5, "blue": 0.1},
+        "Daily Input": {"red": 0.7, "green": 0.4, "blue": 0.1},
     }
     return colors.get(tab_name, {"red": 0.3, "green": 0.3, "blue": 0.3})

@@ -17,12 +17,17 @@ from ozon_agent.sheets.client import (
 )
 from ozon_agent.sheets.exporters.approvals import export_approvals
 from ozon_agent.sheets.exporters.competitors import export_competitors
+from ozon_agent.sheets.exporters.daily_control import export_daily_control
+from ozon_agent.sheets.exporters.daily_input import export_daily_input
 from ozon_agent.sheets.exporters.daily_report import export_daily_report
+from ozon_agent.sheets.exporters.daily_summary import export_daily_summary
 from ozon_agent.sheets.exporters.experiments import export_experiments
 from ozon_agent.sheets.exporters.ingestion_status import export_ingestion_status
 from ozon_agent.sheets.exporters.market_insights import export_market_insights
 from ozon_agent.sheets.exporters.memory import export_memory
+from ozon_agent.sheets.exporters.products import export_products
 from ozon_agent.sheets.exporters.recommendations import export_recommendations
+from ozon_agent.sheets.exporters.stocks import export_stocks
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +40,11 @@ TAB_EXPORTERS: dict[str, Any] = {
     "Recommendation Memory": export_memory,
     "Ingestion Status": export_ingestion_status,
     "Approvals": export_approvals,
+    "Products": export_products,
+    "Stocks": export_stocks,
+    "Daily Summary": export_daily_summary,
+    "Daily Control": export_daily_control,
+    "Daily Input": export_daily_input,
 }
 
 _SYNC_STATUS_FILE = Path("data") / "sheets" / "sync_status.json"
