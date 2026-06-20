@@ -19,6 +19,7 @@ from ozon_agent.sheets.client import (
     retry_on_rate_limit,
 )
 from ozon_agent.sheets.exporters.approvals import export_approvals
+from ozon_agent.sheets.exporters.cogs import export_cogs
 from ozon_agent.sheets.exporters.competitors import export_competitors
 from ozon_agent.sheets.exporters.daily_control import export_daily_control
 from ozon_agent.sheets.exporters.daily_input import export_daily_input
@@ -50,6 +51,7 @@ TAB_EXPORTERS: dict[str, Any] = {
     "Daily Summary": export_daily_summary,
     "Daily Control": export_daily_control,
     "Daily Input": export_daily_input,
+    "COGS": export_cogs,
 }
 
 _SYNC_STATUS_FILE = Path("data") / "sheets" / "sync_status.json"

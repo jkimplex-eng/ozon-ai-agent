@@ -129,6 +129,14 @@ TABS: list[dict[str, Any]] = [
         ],
         "status_col": None,
     },
+    {
+        "name": "COGS",
+        "columns": [
+            "SKU", "Offer ID", "Product Name", "Unit Cost",
+            "Logistics Cost", "Packaging Cost", "Source", "Updated At", "Status",
+        ],
+        "status_col": 8,
+    },
 ]
 
 
@@ -182,5 +190,6 @@ def _tab_color(tab_name: str) -> dict[str, float]:
         "Daily Summary": {"red": 0.1, "green": 0.5, "blue": 0.7},
         "Daily Control": {"red": 0.8, "green": 0.5, "blue": 0.1},
         "Daily Input": {"red": 0.7, "green": 0.4, "blue": 0.1},
+        "COGS": {"red": 0.6, "green": 0.6, "blue": 0.2},
     }
     return colors.get(tab_name, {"red": 0.3, "green": 0.3, "blue": 0.3})

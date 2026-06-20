@@ -2435,5 +2435,120 @@ def sheets_status() -> None:
     console.print(table)
 
 
+@main.group()
+def cogs() -> None:
+    """Manage COGS (sebestoimost) per SKU."""
+
+
+@cogs.command("status")
+def cogs_status() -> None:
+    """Show COGS coverage report."""
+    from .cogs.coverage import calculate_coverage, format_coverage_report
+    from .cogs.service import _load_products
+
+    products = _load_products()
+    report = calculate_coverage(products)
+    console.print(format_coverage_report(report))
+
+
+@cogs.command("list")
+def cogs_list() -> None:
+    """List all COGS entries."""
+    from .cogs.service import list_cogs
+
+    records = list_cogs()
+    if not records:
+        console.print("[yellow]No COGS entries found.[/]")
+        return
+
+    table = Table(title=f"COGS ({len(records)} entries)")
+    table.add_column("SKU")
+    table.add_column("Product")
+    table.add_column("Unit Cost")
+    table.add_column("Logistics")
+    table.add_column("Packaging")
+    table.add_column("Source")
+    table.add_column("Updated")
+
+    for r in records:
+        table.add_row(
+            r.sku,
+            r.product_name or "—",
+            f"{r.unit_cost:.0f}",
+            f"{r.logistics_cost:.0f}",
+            f"{r.packaging_cost:.0f}",
+            r.source,
+            r.updated_at.strftime("%Y-%m-%d"),
+        )
+    console.print(table)
+
+
+@cogs.command("set")
+@click.argument("sku")
+@click.argument("unit_cost", type=float)
+@click.option("--logistics", default=0.0, type=float, help="Logistics cost per unit")
+@click.option("--packaging", default=0.0, type=float, help="Packaging cost per unit")
+@click.option("--name", default=None, help="Product name")
+def cogs_set(sku: str, unit_cost: float, logistics: float, packaging: float, name: str | None) -> None:
+    """Set COGS for a SKU."""
+    from .cogs.service import set_cogs
+
+    try:
+        record = set_cogs(
+            sku=sku,
+            unit_cost=unit_cost,
+            logistics_cost=logistics,
+            packaging_cost=packaging,
+            product_name=name,
+        )
+        console.print("[green]COGS updated[/]")
+        console.print(f"  SKU: {record.sku}")
+        console.print(f"  Unit cost: {record.unit_cost:.0f}")
+        console.print(f"  This SKU will now be included in Daily P&L.")
+    except ValueError as e:
+        console.print(f"[red]Error: {e}[/]")
+
+
+@cogs.command("missing")
+def cogs_missing() -> None:
+    """Show products without COGS."""
+    from .cogs.service import missing_cogs
+
+    items = missing_cogs()
+    if not items:
+        console.print("[green]All products have COGS.[/]")
+        return
+
+    console.print(f"[yellow]Missing COGS: {len(items)} products[/]")
+    for item in items[:20]:
+        console.print(f"  - SKU {item['sku']} — {item['name']}")
+
+
+@cogs.command("import")
+@click.argument("path")
+def cogs_import(path: str) -> None:
+    """Import COGS from CSV file."""
+    from .cogs.importer import import_csv
+
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        count = import_csv(text)
+        console.print(f"[green]Imported {count} COGS entries from {path}[/]")
+    except FileNotFoundError:
+        console.print(f"[red]File not found: {path}[/]")
+    except Exception as e:
+        console.print(f"[red]Import failed: {e}[/]")
+
+
+@cogs.command("clear")
+def cogs_clear() -> None:
+    """Clear all COGS entries."""
+    from .cogs.service import clear_all
+
+    count = clear_all()
+    console.print(f"[yellow]Cleared {count} COGS entries.[/]")
+
+
 if __name__ == "__main__":
     main()
