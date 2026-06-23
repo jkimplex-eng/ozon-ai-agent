@@ -112,11 +112,12 @@ def build_sku_forecast(
     confidence = _confidence_from_stability(stability)
 
     def _make_forecast(metric: str, values: list[float], days: int) -> list[ForecastPoint]:
+        from datetime import timedelta
         points = []
         base_date = datetime.now(UTC)
         forecasts = _simple_forecast(values, days)
         for i, val in enumerate(forecasts):
-            date = base_date.replace(day=base_date.day + i + 1)
+            date = base_date + timedelta(days=i + 1)
             width = val * (1 - stability) * 0.2
             points.append(ForecastPoint(
                 date=date.strftime("%Y-%m-%d"),
