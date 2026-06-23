@@ -1390,6 +1390,83 @@ def cockpit_build(save: bool) -> None:
         console.print(f"  [{a.priority}] {a.action} ({a.sku})")
 
 
+@main.command("system-audit")
+@click.option("--save", is_flag=True, help="Save report to disk")
+def system_audit(save: bool) -> None:
+    """Run full system audit — verify all components are running."""
+    from .operations.system_audit import (
+        format_audit,
+        run_system_audit,
+        save_audit_report,
+    )
+
+    console.print("[bold blue]Running system audit...[/]")
+    audit = run_system_audit()
+    console.print(format_audit(audit))
+
+    status_color = "green" if audit.overall_status == "HEALTHY" else "red"
+    console.print(f"\n[bold {status_color}]Overall: {audit.overall_status}[/]")
+
+    if save:
+        path = save_audit_report(audit)
+        console.print(f"[dim]Report saved: {path}[/]")
+
+
+@main.command("daily-brief")
+@click.option("--save", is_flag=True, help="Save briefing to disk")
+def daily_brief(save: bool) -> None:
+    """Generate daily briefing with risks, opportunities, and actions."""
+    from .operations.daily import (
+        format_briefing,
+        generate_daily_briefing,
+        save_briefing,
+    )
+
+    console.print("[bold blue]Generating daily briefing...[/]")
+    briefing = generate_daily_briefing()
+    console.print(format_briefing(briefing))
+
+    if save:
+        path = save_briefing(briefing)
+        console.print(f"[dim]Briefing saved: {path}[/]")
+
+
+@main.command("forecast")
+@click.argument("sku_name")
+@click.option("--save", is_flag=True, help="Save forecast to disk")
+def forecast_cmd(sku_name: str, save: bool) -> None:
+    """Generate forecast for a SKU."""
+    from .operations.forecasting import (
+        build_sku_forecast,
+        format_forecast,
+        save_forecast,
+    )
+
+    daily_data = []
+    try:
+        from .sheets.file_source import load_sales
+        daily_data = load_sales() or []
+    except Exception:
+        pass
+
+    console.print(f"[bold blue]Forecasting {sku_name}...[/]")
+    forecast = build_sku_forecast(sku_name, daily_data)
+    console.print(format_forecast(forecast))
+
+    if save:
+        path = save_forecast(forecast)
+        console.print(f"[dim]Forecast saved: {path}[/]")
+
+
+@main.command("tracking-stats")
+def tracking_stats_cmd() -> None:
+    """Show recommendation tracking statistics."""
+    from .operations.tracking import format_tracking_stats, get_tracking_stats
+
+    stats = get_tracking_stats()
+    console.print(format_tracking_stats(stats))
+
+
 @main.group()
 def skills() -> None:
     """Manage local skills registry."""
