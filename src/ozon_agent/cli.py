@@ -1,7 +1,8 @@
 """Ozon AI Agent CLI."""
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 from rich.console import Console
@@ -1137,6 +1138,256 @@ def learning_by_sku() -> None:
     for sku, acc in by_sku.items():
         console.print(f"\n[bold]{sku}[/]:")
         console.print(format_accuracy(acc))
+
+
+@learning.command("success-db")
+def learning_success_db() -> None:
+    """Show recommendation success database statistics."""
+    from .learning.success_database import build_success_database, save_database_report
+
+    db = build_success_database()
+
+    if db.total_records == 0:
+        console.print("[yellow]No success records found.[/]")
+        return
+
+    table = Table(title="Recommendation Success Database")
+    table.add_column("Metric")
+    table.add_column("Value")
+
+    table.add_row("Total Records", str(db.total_records))
+    table.add_row("Overall Success Rate", f"{db.overall_success_rate * 100:.1f}%")
+    table.add_row("Average Score", f"{db.overall_average_score:.3f}")
+
+    console.print(table)
+
+    if db.by_action:
+        action_table = Table(title="By Action Type")
+        action_table.add_column("Action")
+        action_table.add_column("Total")
+        action_table.add_column("Success Rate")
+        action_table.add_column("Avg Score")
+
+        for action, stats in sorted(db.by_action.items()):
+            action_table.add_row(
+                action,
+                str(stats.total),
+                f"{stats.success_rate * 100:.1f}%",
+                f"{stats.average_score:.3f}",
+            )
+        console.print(action_table)
+
+    path = save_database_report(db)
+    console.print(f"[dim]Report saved: {path}[/]")
+
+
+@learning.command("confidence")
+@click.argument("action")
+@click.option("--sku", default=None, help="SKU for SKU-specific confidence")
+def learning_confidence(action: str, sku: str | None) -> None:
+    """Show confidence explanation for an action/SKU combination."""
+    from .learning.success_database import get_confidence_explanation
+
+    explanation = get_confidence_explanation(action, sku)
+    console.print(explanation)
+
+
+@learning.command("impact")
+def learning_impact() -> None:
+    """Show recommendation impact records."""
+    from .learning.auto_outcomes import load_impact_records
+
+    records = load_impact_records()
+
+    if not records:
+        console.print("[yellow]No impact records found.[/]")
+        return
+
+    table = Table(title=f"Recommendation Impact ({len(records)} records)")
+    table.add_column("ID")
+    table.add_column("SKU")
+    table.add_column("Action")
+    table.add_column("Revenue Δ")
+    table.add_column("Profit Δ")
+    table.add_column("DRR Δ")
+    table.add_column("Window")
+
+    for rec in records[-20:]:
+        rev_delta = f"{rec.revenue_delta_pct:+.1f}%" if rec.revenue_delta_pct is not None else "—"
+        prof_delta = f"{rec.profit_delta_pct:+.1f}%" if rec.profit_delta_pct is not None else "—"
+        drr_delta = f"{rec.drr_delta_pct:+.1f}%" if rec.drr_delta_pct is not None else "—"
+        table.add_row(
+            rec.recommendation_id[:12],
+            rec.sku,
+            rec.action,
+            rev_delta,
+            prof_delta,
+            drr_delta,
+            f"{rec.window_days}d",
+        )
+
+    console.print(table)
+
+
+@main.group()
+def sku() -> None:
+    """SKU intelligence — comparison, history, risk, and opportunities."""
+
+
+@sku.command("compare")
+@click.argument("sku1")
+@click.argument("sku2")
+def sku_compare(sku1: str, sku2: str) -> None:
+    """Compare two SKUs across key metrics."""
+    from .intelligence.sku_intelligence import (
+        SkuMetrics,
+        compare_skus,
+        format_comparison,
+    )
+
+    metrics1 = SkuMetrics(sku=sku1, name=sku1)
+    metrics2 = SkuMetrics(sku=sku2, name=sku2)
+
+    comp = compare_skus(metrics1, metrics2)
+    console.print(format_comparison(comp))
+
+
+@sku.command("history")
+@click.argument("sku_name")
+@click.option("--days", default=30, help="Number of days to look back")
+def sku_history(sku_name: str, days: int) -> None:
+    """Show SKU history for the given period."""
+    from .intelligence.sku_intelligence import (
+        build_sku_history,
+        format_history,
+    )
+
+    sample_data = [
+        {
+            "date": f"2026-06-{d:02d}",
+            "revenue": 10000 + d * 100,
+            "profit": 3000 + d * 30,
+            "orders": 50 + d,
+            "margin": 35.0,
+            "drr": 8.0,
+        }
+        for d in range(1, min(days + 1, 22))
+    ]
+
+    history = build_sku_history(sku_name, sample_data, period_days=days)
+    console.print(format_history(history))
+
+
+@sku.command("risk")
+@click.argument("sku_name")
+def sku_risk(sku_name: str) -> None:
+    """Detect risks for a SKU."""
+    from .intelligence.sku_intelligence import (
+        SkuMetrics,
+        detect_sku_risk,
+        format_risk,
+    )
+
+    metrics = SkuMetrics(sku=sku_name, name=sku_name, margin=25.0, drr=15.0, stock_days=10)
+    risk = detect_sku_risk(sku_name, metrics)
+    console.print(format_risk(risk))
+
+
+@sku.command("opportunity")
+@click.argument("sku_name")
+def sku_opportunity(sku_name: str) -> None:
+    """Detect opportunities for a SKU."""
+    from .intelligence.sku_intelligence import (
+        SkuMetrics,
+        detect_sku_opportunity,
+        format_opportunity,
+    )
+
+    metrics = SkuMetrics(sku=sku_name, name=sku_name, margin=45.0, drr=5.0, trend_revenue_pct=20.0)
+    opp = detect_sku_opportunity(sku_name, metrics)
+    console.print(format_opportunity(opp))
+
+
+@main.group()
+def quality() -> None:
+    """Data quality monitoring and reporting."""
+
+
+@quality.command("report")
+@click.option("--save", is_flag=True, help="Save report to disk")
+def quality_report(save: bool) -> None:
+    """Generate data quality report."""
+    from .quality.data_quality import (
+        build_quality_report,
+        format_quality_report,
+        save_quality_report,
+    )
+
+    console.print("[bold blue]Generating data quality report...[/]")
+
+    daily_data = []
+    try:
+        from .sheets.file_source import load_sales
+        daily_data = load_sales() or []
+    except Exception:
+        pass
+
+    report = build_quality_report(daily_data=daily_data)
+    console.print(format_quality_report(report))
+
+    if save:
+        path = save_quality_report(report)
+        console.print(f"[dim]Report saved: {path}[/]")
+
+
+@main.group()
+def cockpit() -> None:
+    """Management cockpit — executive dashboard."""
+
+
+@cockpit.command("build")
+@click.option("--save", is_flag=True, help="Export to Google Sheets")
+def cockpit_build(save: bool) -> None:
+    """Build management cockpit from current data."""
+    from .sheets.exporters.management_cockpit import (
+        build_cockpit_from_data,
+    )
+
+    console.print("[bold blue]Building Management Cockpit...[/]")
+
+    daily_data = []
+    try:
+        from .sheets.file_source import load_sales
+        daily_data = load_sales() or []
+    except Exception:
+        pass
+
+    cockpit = build_cockpit_from_data(daily_summary=daily_data)
+
+    console.print(f"\n[bold]Management Cockpit[/] ({cockpit.generated_at})")
+    console.print(f"\nRevenue: {len(cockpit.revenue)} metrics")
+    for m in cockpit.revenue:
+        console.print(f"  {m.name}: {m.value:,.0f}")
+
+    console.print(f"\nProfit: {len(cockpit.profit)} metrics")
+    for m in cockpit.profit:
+        console.print(f"  {m.name}: {m.value:,.0f}")
+
+    console.print(f"\nAdvertising: {len(cockpit.advertising)} metrics")
+    for m in cockpit.advertising:
+        console.print(f"  {m.name}: {m.value:,.0f}")
+
+    console.print(f"\nRisks: {len(cockpit.risks)}")
+    for r in cockpit.risks:
+        console.print(f"  [{r.severity}] {r.sku}: {r.risk_type}")
+
+    console.print(f"\nOpportunities: {len(cockpit.opportunities)}")
+    for o in cockpit.opportunities:
+        console.print(f"  {o.sku}: {o.opportunity} (score: {o.score:.0f})")
+
+    console.print(f"\nActions Required: {len(cockpit.actions)}")
+    for a in cockpit.actions:
+        console.print(f"  [{a.priority}] {a.action} ({a.sku})")
 
 
 @main.group()
@@ -2435,6 +2686,110 @@ def sheets_status() -> None:
     console.print(table)
 
 
+@sheets.command("health")
+@click.option("--save", is_flag=True, help="Save report to disk")
+def sheets_health(save: bool) -> None:
+    """Audit workbook for formula errors and structural issues."""
+    from .sheets.health import audit_workbook, save_audit_report
+
+    console.print("[bold blue]Auditing workbook health...[/]")
+    try:
+        health = audit_workbook()
+    except Exception as e:
+        console.print(f"[red]Failed: {e}[/]")
+        return
+
+    table = Table(title=f"Workbook Health: {health.title}")
+    table.add_column("Tab")
+    table.add_column("Formulas")
+    table.add_column("Errors")
+    table.add_column("Status")
+
+    for tab in health.tabs:
+        if not tab.exists:
+            table.add_row(tab.tab, "—", "—", "[red]MISSING[/]")
+        else:
+            color = "green" if tab.error_count == 0 else "red"
+            table.add_row(
+                tab.tab,
+                str(tab.formula_count),
+                str(tab.error_count),
+                f"[{color}]{tab.status}[/]",
+            )
+
+    console.print(table)
+    console.print(f"Total formulas: {health.total_formulas}")
+    console.print(f"Total errors: {health.total_errors}")
+    if health.error_summary:
+        console.print(f"Error breakdown: {health.error_summary}")
+
+    status_color = "green" if health.status == "OK" else "red"
+    console.print(f"\n[bold {status_color}]Workbook Status: {health.status}[/]")
+
+    if save:
+        path = save_audit_report(health)
+        console.print(f"[dim]Report saved: {path}[/]")
+
+
+@sheets.command("repair")
+@click.option("--dry-run", is_flag=True, default=True, help="Preview changes without applying")
+@click.option("--apply", "do_apply", is_flag=True, help="Actually apply repairs")
+def sheets_repair(dry_run: bool, do_apply: bool) -> None:
+    """Check and repair workbook issues (formulas, tabs, references)."""
+    from .sheets.repair import repair_workbook
+
+    actually_dry = not do_apply
+    mode = "DRY RUN" if actually_dry else "APPLYING"
+    console.print(f"[bold blue]Workbook Repair ({mode})...[/]")
+
+    try:
+        result = repair_workbook(dry_run=actually_dry)
+    except Exception as e:
+        console.print(f"[red]Failed: {e}[/]")
+        return
+
+    if not result.actions:
+        console.print("[green]No issues found. Workbook is healthy.[/]")
+        return
+
+    table = Table(title="Repair Actions")
+    table.add_column("Tab")
+    table.add_column("Issue")
+    table.add_column("Fix")
+    table.add_column("Applied")
+
+    for action in result.actions:
+        applied_str = "[green]YES[/]" if action.applied else "[yellow]NO[/]"
+        table.add_row(action.tab, action.issue, action.fix, applied_str)
+
+    console.print(table)
+    console.print(f"Total actions: {result.total_actions}")
+    console.print(f"Applied: {result.applied_count}")
+
+
+@sheets.command("create-month")
+@click.option("--month", default=None, help="Target month YYYY-MM (default: next month)")
+def sheets_create_month(month: str | None) -> None:
+    """Create next month's Daily Input tab from template."""
+    from .sheets.auto_month import create_next_month_tab
+
+    console.print("[bold blue]Creating monthly tab...[/]")
+
+    try:
+        result = create_next_month_tab(target_month=month)
+    except Exception as e:
+        console.print(f"[red]Failed: {e}[/]")
+        return
+
+    if result.created:
+        console.print(f"[green]{result.message}[/]")
+        console.print(f"  Tab: {result.tab_name}")
+        console.print(f"  Source: {result.source_tab}")
+        console.print(f"  Rows: {result.rows}, Columns: {result.columns}")
+    else:
+        console.print(f"[yellow]{result.message}[/]")
+
+
 @main.group()
 def cogs() -> None:
     """Manage COGS (sebestoimost) per SKU."""
@@ -2489,7 +2844,13 @@ def cogs_list() -> None:
 @click.option("--logistics", default=0.0, type=float, help="Logistics cost per unit")
 @click.option("--packaging", default=0.0, type=float, help="Packaging cost per unit")
 @click.option("--name", default=None, help="Product name")
-def cogs_set(sku: str, unit_cost: float, logistics: float, packaging: float, name: str | None) -> None:
+def cogs_set(
+    sku: str,
+    unit_cost: float,
+    logistics: float,
+    packaging: float,
+    name: str | None,
+) -> None:
     """Set COGS for a SKU."""
     from .cogs.service import set_cogs
 
@@ -2504,7 +2865,7 @@ def cogs_set(sku: str, unit_cost: float, logistics: float, packaging: float, nam
         console.print("[green]COGS updated[/]")
         console.print(f"  SKU: {record.sku}")
         console.print(f"  Unit cost: {record.unit_cost:.0f}")
-        console.print(f"  This SKU will now be included in Daily P&L.")
+        console.print("  This SKU will now be included in Daily P&L.")
     except ValueError as e:
         console.print(f"[red]Error: {e}[/]")
 
@@ -2544,7 +2905,7 @@ def cogs_import(path: str) -> None:
 @cogs.command("clear")
 def cogs_clear() -> None:
     """Clear all COGS entries."""
-    from .cogs.service import clear_all
+    from .cogs.repository import clear_all
 
     count = clear_all()
     console.print(f"[yellow]Cleared {count} COGS entries.[/]")
@@ -2725,6 +3086,367 @@ def performance_report_status(report_id: str, download: bool) -> None:
             console.print(f"[green]Downloaded {len(result.rows)} rows[/]")
         except Exception as exc:
             raise click.ClickException(str(exc)) from exc
+
+
+@main.group("retro")
+def retro() -> None:
+    """Historical data activation and retro learning commands."""
+
+
+@retro.command("activate")
+def retro_activate() -> None:
+    """Activate imported ollama-bot historical data into runtime files."""
+    from .retro.activation import activate_historical_data
+
+    result = activate_historical_data()
+    table = Table(title="Historical Data Activation")
+    table.add_column("Metric")
+    table.add_column("Value")
+    for key, value in result.to_dict().items():
+        table.add_row(key, str(value))
+    console.print(table)
+
+
+@retro.command("learning-summary")
+def retro_learning_summary() -> None:
+    """Show historical learning summary."""
+    from .retro.activation import load_learning_summary
+
+    summary = load_learning_summary()
+    table = Table(title="Historical Learning Summary")
+    table.add_column("Metric")
+    table.add_column("Value")
+    for key, value in summary.items():
+        table.add_row(str(key), str(value))
+    console.print(table)
+
+
+@retro.command("daily-history")
+def retro_daily_history() -> None:
+    """Show activated daily history preview."""
+    from .retro.historical_aggregator import build_daily_history
+
+    rows = build_daily_history()
+    table = Table(title=f"Historical Daily History ({len(rows)} rows)")
+    table.add_column("Date")
+    table.add_column("Revenue")
+    table.add_column("Orders")
+    table.add_column("Advertising")
+    table.add_column("COGS")
+    table.add_column("Profit")
+    table.add_column("DRR")
+    for row in rows[-20:]:
+        table.add_row(
+            str(row.get("date", "")),
+            f"{float(row.get('revenue') or 0):.2f}",
+            str(row.get("orders", 0)),
+            f"{float(row.get('advertising') or 0):.2f}",
+            f"{float(row.get('cogs') or 0):.2f}",
+            f"{float(row.get('profit') or 0):.2f}",
+            f"{float(row.get('drr') or 0):.2f}",
+        )
+    console.print(table)
+
+
+@main.group("telegram")
+def telegram() -> None:
+    """Telegram bot runtime."""
+
+
+@dataclass(frozen=True)
+class TelegramRuntimeConfig:
+    request_timeout: int
+    retry_attempts: int
+    retry_backoff_seconds: int
+    proxy_url: str | None = None
+
+
+def _get_env_int(name: str, default: int, minimum: int = 1) -> int:
+    import os
+
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise click.ClickException(f"{name} must be an integer") from exc
+    if value < minimum:
+        raise click.ClickException(f"{name} must be >= {minimum}")
+    return value
+
+
+def _telegram_runtime_config_from_env() -> TelegramRuntimeConfig:
+    import os
+
+    proxy_url = os.environ.get("TELEGRAM_PROXY_URL", "").strip() or None
+    return TelegramRuntimeConfig(
+        request_timeout=_get_env_int("TELEGRAM_REQUEST_TIMEOUT", 30, minimum=5),
+        retry_attempts=_get_env_int("TELEGRAM_RETRY_ATTEMPTS", 3, minimum=1),
+        retry_backoff_seconds=_get_env_int(
+            "TELEGRAM_RETRY_BACKOFF_SECONDS",
+            10,
+            minimum=0,
+        ),
+        proxy_url=proxy_url,
+    )
+
+
+def _mask_proxy_url(proxy_url: str | None) -> str:
+    if not proxy_url:
+        return "none"
+
+    import urllib.parse
+
+    parsed = urllib.parse.urlsplit(proxy_url)
+    if not parsed.username and not parsed.password:
+        return proxy_url
+
+    username = urllib.parse.quote(parsed.username or "")
+    password = "***" if parsed.password else ""
+    auth = username
+    if password:
+        auth = f"{auth}:{password}"
+    host = parsed.hostname or ""
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    netloc = f"{auth}@{host}"
+    if parsed.port:
+        netloc = f"{netloc}:{parsed.port}"
+    return urllib.parse.urlunsplit(
+        (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment)
+    )
+
+
+def _build_telegram_opener(proxy_url: str | None) -> Any:
+    import urllib.parse
+    import urllib.request
+
+    if not proxy_url:
+        return urllib.request.build_opener()
+
+    parsed = urllib.parse.urlsplit(proxy_url)
+    scheme = parsed.scheme.lower()
+    if scheme not in {"http", "https"}:
+        raise click.ClickException(
+            "TELEGRAM_PROXY_URL supports http:// or https:// proxy URLs in this build. "
+            "SOCKS5 needs an extra dependency and is intentionally not enabled here."
+        )
+    proxy_handler = urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
+    return urllib.request.build_opener(proxy_handler)
+
+
+def _telegram_api_json(
+    opener: Any,
+    url: str,
+    *,
+    data: bytes | None = None,
+    timeout: int,
+    attempts: int,
+    backoff_seconds: int,
+    action: str,
+) -> dict[str, Any]:
+    import json
+    import time
+    import urllib.error
+    import urllib.request
+
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            request: str | urllib.request.Request
+            request = urllib.request.Request(url, data=data) if data is not None else url
+            with opener.open(request, timeout=timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            return payload if isinstance(payload, dict) else {}
+        except (TimeoutError, OSError, urllib.error.URLError) as exc:
+            last_exc = exc
+            console.print(
+                "[yellow]Telegram API warning: "
+                f"{escape(action)} attempt {attempt}/{attempts} failed: "
+                f"{escape(type(exc).__name__)}[/]"
+            )
+            if attempt < attempts and backoff_seconds > 0:
+                time.sleep(backoff_seconds)
+    if last_exc is not None:
+        raise last_exc
+    return {}
+
+
+def _telegram_send_message(
+    opener: Any,
+    base_url: str,
+    chat_id: Any,
+    text: str,
+    config: TelegramRuntimeConfig,
+) -> bool:
+    import urllib.parse
+
+    data = urllib.parse.urlencode({"chat_id": chat_id, "text": text}).encode()
+    try:
+        _telegram_api_json(
+            opener,
+            f"{base_url}/sendMessage",
+            data=data,
+            timeout=config.request_timeout,
+            attempts=config.retry_attempts,
+            backoff_seconds=config.retry_backoff_seconds,
+            action="sendMessage",
+        )
+    except Exception as exc:
+        console.print(
+            "[red]Telegram sendMessage failed after retries: "
+            f"{escape(type(exc).__name__)}[/]"
+        )
+        return False
+    console.print("[green]Telegram sendMessage success[/]")
+    return True
+
+
+@telegram.command("run")
+@click.option("--dry-run", is_flag=True, help="Validate configuration without polling")
+def telegram_run(dry_run: bool) -> None:
+    """Run Telegram long-polling bot."""
+    import os
+    import time
+    import urllib.parse
+
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    if not token:
+        raise click.ClickException("TELEGRAM_BOT_TOKEN is not configured")
+    config = _telegram_runtime_config_from_env()
+    opener = _build_telegram_opener(config.proxy_url)
+    if dry_run:
+        console.print("[green]Telegram bot configuration OK[/]")
+        console.print(f"Timeout: {config.request_timeout}s")
+        console.print(f"Retry attempts: {config.retry_attempts}")
+        console.print(f"Retry backoff: {config.retry_backoff_seconds}s")
+        console.print(f"Proxy: {_mask_proxy_url(config.proxy_url)}")
+        return
+
+    from .telegram.bot import handle_message
+
+    base_url = f"https://api.telegram.org/bot{token}"
+    offset = 0
+    console.print("[green]Telegram bot polling started[/]")
+    while True:
+        try:
+            params = urllib.parse.urlencode({"timeout": 30, "offset": offset})
+            payload = _telegram_api_json(
+                opener,
+                f"{base_url}/getUpdates?{params}",
+                timeout=config.request_timeout + 10,
+                attempts=config.retry_attempts,
+                backoff_seconds=config.retry_backoff_seconds,
+                action="getUpdates",
+            )
+            for update in payload.get("result", []):
+                offset = max(offset, int(update.get("update_id", 0)) + 1)
+                message = update.get("message") or {}
+                text = str(message.get("text") or "").strip()
+                chat = message.get("chat") or {}
+                chat_id = chat.get("id")
+                user = str((message.get("from") or {}).get("username") or "telegram")
+                if not text or chat_id is None:
+                    continue
+                command = text.split(maxsplit=1)[0]
+                console.print(f"[cyan]Telegram received command: {escape(command)}[/]")
+                reply = handle_message(text, user=user)
+                console.print(f"[cyan]Telegram handled command: {escape(command)}[/]")
+                _telegram_send_message(opener, base_url, chat_id, reply, config)
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:
+            console.print(
+                "[yellow]Telegram polling warning after retries: "
+                f"{escape(type(exc).__name__)}[/]"
+            )
+            time.sleep(max(config.retry_backoff_seconds, 10))
+
+
+@main.group("reconcile")
+def reconcile_group() -> None:
+    """Reconcile agent analytics against external financial truth sources."""
+
+
+@reconcile_group.command("legacy-finance")
+@click.option("--legacy-id", required=True, help="Read-only legacy Google spreadsheet ID")
+@click.option("--month", required=True, help="Month to reconcile, YYYY-MM")
+def reconcile_legacy_finance_cmd(legacy_id: str, month: str) -> None:
+    """Compare legacy workbook Daily Input financials with Python unit economics."""
+    from .reconciliation.legacy_finance import COMPARE_METRICS, reconcile_legacy_finance
+
+    result = reconcile_legacy_finance(legacy_id=legacy_id, month=month)
+    table = Table(title=f"Legacy Finance Reconciliation {month}")
+    table.add_column("Metric")
+    table.add_column("Legacy", justify="right")
+    table.add_column("New", justify="right")
+    table.add_column("Diff", justify="right")
+    table.add_column("Diff %", justify="right")
+    table.add_column("Status")
+    for row in result.rows:
+        color = "green" if row.status == "OK" else "red"
+        table.add_row(
+            row.metric,
+            f"{row.legacy:.2f}",
+            f"{row.new:.2f}",
+            f"{row.diff:.2f}",
+            f"{row.diff_pct:.2f}%",
+            f"[{color}]{row.status}[/]",
+        )
+    console.print(table)
+    console.print(f"New period: {result.new_period}")
+    console.print(f"Saved: data/reconciliation/legacy_vs_new_{month}.json")
+    if not result.pass_threshold:
+        failed = ", ".join(
+            row.metric for row in result.rows
+            if row.metric in COMPARE_METRICS and row.status != "OK"
+        )
+        raise click.ClickException(
+            f"Financial reconciliation failed threshold for: {failed}"
+        )
+
+
+@main.group("ranking")
+def ranking() -> None:
+    """Ranking Intelligence Engine commands."""
+
+
+@ranking.command("collect")
+def ranking_collect_cmd() -> None:
+    """Collect ranking snapshots from local data."""
+    from .ranking.cli import ranking_collect
+
+    ranking_collect()
+
+
+@ranking.command("analyze")
+def ranking_analyze_cmd() -> None:
+    """Analyze ranking factor correlations."""
+    from .ranking.cli import ranking_analyze
+
+    ranking_analyze()
+
+
+@ranking.command("explain")
+@click.argument("sku")
+@click.option("--date-from", default=None, help="Date from, YYYY-MM-DD")
+@click.option("--date-to", default=None, help="Date to, YYYY-MM-DD")
+def ranking_explain_cmd(sku: str, date_from: str | None, date_to: str | None) -> None:
+    """Explain position change for SKU."""
+    from .ranking.cli import ranking_explain
+
+    ranking_explain(sku, date_from=date_from, date_to=date_to)
+
+
+@ranking.command("top-factors")
+@click.argument("sku")
+@click.option("--limit", default=5, help="Number of factors to show")
+def ranking_top_factors_cmd(sku: str, limit: int) -> None:
+    """Show top ranking factors for SKU."""
+    from .ranking.cli import ranking_top_factors
+
+    ranking_top_factors(sku, limit=limit)
 
 
 if __name__ == "__main__":
