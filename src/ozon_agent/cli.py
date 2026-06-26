@@ -3383,26 +3383,112 @@ def _telegram_send_message(
 @telegram.command("run")
 @click.option("--dry-run", is_flag=True, help="Validate configuration without polling")
 def telegram_run(dry_run: bool) -> None:
-    """Run Telegram bot with InlineKeyboard support."""
+    """Run Telegram bot with InlineKeyboard and callback_query support."""
     import os
+    import time
+    import urllib.parse
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     if not token:
         raise click.ClickException("TELEGRAM_BOT_TOKEN is not configured")
+    config = _telegram_runtime_config_from_env()
 
     if dry_run:
         console.print("[green]Telegram bot configuration OK[/]")
-        console.print(f"Token: {token[:8]}...")
+        console.print(f"Timeout: {config.request_timeout}s")
+        console.print(f"Retry attempts: {config.retry_attempts}")
+        console.print(f"Proxy: {_mask_proxy_url(config.proxy_url)}")
         return
 
-    from .telegram.bot import create_app
+    # Import callback router and handlers
+    from .telegram.callbacks.router import route_callback_data
+    from .telegram.callbacks import (  # noqa: F401 — side-effect imports for @register
+        main_menu_cb, today_cb, business_cb, logistics_cb, ads_cb,
+        finance_cb, risks_cb, tasks_cb, experiments_cb, system_cb,
+        store_cb, quick_cb, rec_cb, owner_cb,
+    )
 
-    proxy_url = os.environ.get("TELEGRAM_PROXY_URL", "").strip() or None
-    console.print("[green]Telegram bot starting with InlineKeyboard support...[/]")
-    if proxy_url:
-        console.print(f"[cyan]Using proxy: {proxy_url[:20]}...[/]")
-    app = create_app(token, proxy_url=proxy_url)
-    app.run_polling(drop_pending_updates=True)
+    opener = _build_telegram_opener(config.proxy_url)
+    base_url = f"https://api.telegram.org/bot{token}"
+    offset = 0
+    console.print("[green]Telegram bot polling started (urllib + InlineKeyboard)[/]")
+    while True:
+        try:
+            params = urllib.parse.urlencode({"timeout": 30, "offset": offset})
+            payload = _telegram_api_json(
+                opener,
+                f"{base_url}/getUpdates?{params}",
+                timeout=config.request_timeout + 10,
+                attempts=config.retry_attempts,
+                backoff_seconds=config.retry_backoff_seconds,
+                action="getUpdates",
+            )
+            for update in payload.get("result", []):
+                offset = max(offset, int(update.get("update_id", 0)) + 1)
+
+                # Handle callback_query (InlineKeyboard button presses)
+                callback_query = update.get("callback_query")
+                if callback_query:
+                    query_id = callback_query.get("id")
+                    data = callback_query.get("data", "")
+                    chat_id = callback_query.get("message", {}).get("chat", {}).get("id")
+                    user = str((callback_query.get("from") or {}).get("username") or "telegram")
+                    if data and chat_id:
+                        console.print(f"[cyan]Callback: {escape(data)}[/]")
+                        result = route_callback_data(data)
+                        if result:
+                            _telegram_send_message(opener, base_url, chat_id, result, config)
+                        # Answer the callback query to dismiss loading spinner
+                        _telegram_api_json(
+                            opener,
+                            f"{base_url}/answerCallbackQuery",
+                            data=urllib.parse.urlencode({"callback_query_id": query_id}).encode(),
+                            timeout=10, attempts=1, backoff_seconds=0,
+                            action="answerCallbackQuery",
+                        )
+                    continue
+
+                # Handle regular messages (text commands)
+                message = update.get("message") or {}
+                text = str(message.get("text") or "").strip()
+                chat = message.get("chat") or {}
+                chat_id = chat.get("id")
+                user = str((message.get("from") or {}).get("username") or "telegram")
+                if not text or chat_id is None:
+                    continue
+                command = text.split(maxsplit=1)[0]
+                console.print(f"[cyan]Telegram received command: {escape(command)}[/]")
+
+                if command == "/start":
+                    from .telegram.keyboards.main_menu import main_menu_keyboard
+                    import json as json_mod
+                    kb = main_menu_keyboard()
+                    reply_markup = json_mod.dumps({"inline_keyboard": [[{"text": b.text, "callback_data": b.callback_data} for b in row] for row in kb.inline_keyboard]})
+                    data = urllib.parse.urlencode({
+                        "chat_id": chat_id,
+                        "text": "🏪 OZON AI — Панель управления\n\nВыберите раздел:",
+                        "reply_markup": reply_markup,
+                    }).encode()
+                    _telegram_api_json(
+                        opener, f"{base_url}/sendMessage",
+                        data=data, timeout=config.request_timeout,
+                        attempts=config.retry_attempts,
+                        backoff_seconds=config.retry_backoff_seconds,
+                        action="sendMessage",
+                    )
+                else:
+                    from .telegram.bot import handle_message
+                    reply = handle_message(text, user=user)
+                    console.print(f"[cyan]Telegram handled command: {escape(command)}[/]")
+                    _telegram_send_message(opener, base_url, chat_id, reply, config)
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:
+            console.print(
+                "[yellow]Telegram polling warning after retries: "
+                f"{escape(type(exc).__name__)}[/]"
+            )
+            time.sleep(max(config.retry_backoff_seconds, 10))
 
 
 @main.group("reconcile")
