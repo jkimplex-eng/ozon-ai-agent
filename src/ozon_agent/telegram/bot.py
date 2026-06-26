@@ -1,48 +1,104 @@
-"""Telegram bot for recommendation approvals and experiment management.
+"""Telegram bot — thin command router.
 
-Safety:
-- Telegram can approve/reject recommendations only.
-- Telegram can manage experiment state only (no Ozon write APIs).
-- Telegram must not change prices, bids, stock, campaigns.
+Delegates all handler logic to handlers_text.py.
+Backward-compatible: handle_message(text, user) returns same strings as before.
 """
 from __future__ import annotations
 
 import importlib
+import subprocess  # noqa: F401 — re-exported for test mocks
 from typing import Any
 
-from ozon_agent.approval.models import RecommendationStatus, StoredRecommendation
 from ozon_agent.approval.repository import get_recommendation, list_recommendations
 from ozon_agent.approval.workflow import approve_recommendation, reject_recommendation
+from ozon_agent.telegram.handlers_text import (
+    _alerts,
+    _approve,
+    _cogs_status,
+    _daily,
+    _economics,
+    _experiment_list,
+    _experiment_report,
+    _experiment_show,
+    _experiment_transition,
+    _experiment_cancel,
+    _handle_experiments,
+    _handle_outcome,
+    _help_text,
+    _learn,
+    _list_pending,
+    _outcomes,
+    _recommendations_v2,
+    _reject,
+    _retro,
+    _show,
+    _signals,
+    _sku_detail,
+    _status_dashboard,
+    _today,
+    _top_sku,
+    _why_down,
+    _worst_sku,
+    format_rec_message,
+)
 
-
-def format_rec_message(rec: StoredRecommendation) -> str:
-    lines = [
-        f"Recommendation ID: {rec.id}",
-        f"SKU: {rec.sku}",
-        f"Action: {rec.action.value}",
-        f"Expected: {rec.expected_effect}",
-        f"Confidence: {rec.confidence_level.value if rec.confidence_level else 'N/A'}"
-        f" ({rec.confidence_score:.2f})" if rec.confidence_score is not None else "",
-        f"Risk: {rec.risk_level.value if rec.risk_level else 'N/A'}"
-        f" ({rec.risk_score:.2f})" if rec.risk_score is not None else "",
-        f"Reason: {rec.reason}",
-        "",
-        "Approve:",
-        f"/recommendations approve {rec.id}",
-        "",
-        "Reject:",
-        f"/recommendations reject {rec.id} reason",
-    ]
-    return "\n".join(line for line in lines if line is not None)
+__all__ = ["handle_message", "create_app", "format_rec_message"]
 
 
 def handle_message(text: str, user: str) -> str:
+    try:
+        return _handle_message(text, user)
+    except Exception as exc:
+        return (
+            "Команда временно недоступна.\n"
+            "Я записал ошибку в лог, бот продолжает работать.\n\n"
+            f"Тип ошибки: {type(exc).__name__}"
+        )
+
+
+def _handle_message(text: str, user: str) -> str:
     parts = text.strip().split(maxsplit=3)
     if not parts:
         return _help_text()
 
+    if parts[0] == "/help":
+        return _help_text()
+    if parts[0] == "/status":
+        return _status_dashboard()
     if parts[0] == "/experiments":
         return _handle_experiments(parts, user)
+    if parts[0] == "/signals":
+        return _signals()
+    if parts[0] == "/recommendations" and len(parts) == 1:
+        return _recommendations_v2()
+    if parts[0] == "/daily":
+        return _daily()
+    if parts[0] == "/cogs":
+        return _cogs_status()
+    if parts[0] == "/learn":
+        return _learn()
+    if parts[0] == "/why_down":
+        sku = parts[1] if len(parts) >= 2 else ""
+        return _why_down(sku)
+    if parts[0] == "/sku":
+        sku = parts[1] if len(parts) >= 2 else ""
+        return _sku_detail(sku)
+    if parts[0] == "/economics":
+        return _economics()
+    if parts[0] == "/alerts":
+        return _alerts()
+    if parts[0] == "/retro":
+        return _retro()
+    if parts[0] == "/today":
+        return _today()
+    if parts[0] == "/outcomes":
+        return _outcomes()
+    if parts[0] == "/outcome":
+        return _handle_outcome(parts, user)
+    if parts[0] == "/top_sku":
+        return _top_sku()
+    if parts[0] == "/worst_sku":
+        return _worst_sku()
 
     if parts[0] != "/recommendations":
         return _help_text()
@@ -63,227 +119,12 @@ def handle_message(text: str, user: str) -> str:
         return _reject(parts[2], user, reason)
 
     return (
-        "Usage:\n"
-        "/recommendations — list pending\n"
+        "Использование:\n"
+        "/recommendations — список рекомендаций\n"
         "/recommendations approve <id>\n"
-        "/recommendations reject <id> <reason>\n"
+        "/recommendations reject <id> <причина>\n"
         "/recommendations show <id>"
     )
-
-
-def _help_text() -> str:
-    return (
-        "Available commands:\n"
-        "/recommendations — list pending\n"
-        "/recommendations approve <id>\n"
-        "/recommendations reject <id> <reason>\n"
-        "/recommendations show <id>\n"
-        "/experiments — list experiments\n"
-        "/experiments list\n"
-        "/experiments show <id>\n"
-        "/experiments ready <id>\n"
-        "/experiments start <id>\n"
-        "/experiments pause <id>\n"
-        "/experiments complete <id>\n"
-        "/experiments cancel <id> reason\n"
-        "/experiments report <id>"
-    )
-
-
-def _list_pending() -> str:
-    recs = list_recommendations(status=RecommendationStatus.PENDING, limit=10)
-    if not recs:
-        return "No pending recommendations."
-    lines = [f"Pending recommendations ({len(recs)}):", ""]
-    for rec in recs:
-        lines.append(
-            f"  {rec.id[:8]}... | SKU: {rec.sku} | Action: {rec.action.value}"
-        )
-    lines.append("")
-    lines.append("Use /recommendations show <id> for details.")
-    return "\n".join(lines)
-
-
-def _show(rec_id: str) -> str:
-    rec = get_recommendation(rec_id)
-    if rec is None:
-        full_id = _resolve_short_id(rec_id)
-        if full_id:
-            rec = get_recommendation(full_id)
-    if rec is None:
-        return f"Recommendation {rec_id} not found."
-    return format_rec_message(rec)
-
-
-def _approve(rec_id: str, user: str) -> str:
-    full_id = _resolve_short_id(rec_id)
-    target = full_id or rec_id
-    try:
-        rec = approve_recommendation(target, approved_by=user)
-        return f"Approved {rec.id[:8]}... by {user}"
-    except Exception as e:
-        return f"Failed to approve: {e}"
-
-
-def _reject(rec_id: str, user: str, reason: str) -> str:
-    full_id = _resolve_short_id(rec_id)
-    target = full_id or rec_id
-    try:
-        rec = reject_recommendation(target, rejected_by=user, reason=reason)
-        return f"Rejected {rec.id[:8]}... by {user}: {reason}"
-    except Exception as e:
-        return f"Failed to reject: {e}"
-
-
-def _resolve_short_id(short_id: str) -> str | None:
-    if len(short_id) >= 36:
-        return short_id
-    recs = list_recommendations(limit=100)
-    for rec in recs:
-        if rec.id.startswith(short_id):
-            return rec.id
-    return None
-
-
-def _handle_experiments(parts: list[str], user: str) -> str:
-    if len(parts) == 1:
-        return _experiment_list()
-
-    action = parts[1]
-
-    if action == "list":
-        return _experiment_list()
-
-    if action == "show" and len(parts) >= 3:
-        return _experiment_show(parts[2])
-
-    if action == "ready" and len(parts) >= 3:
-        return _experiment_transition(parts[2], "ready", user)
-
-    if action == "start" and len(parts) >= 3:
-        return _experiment_transition(parts[2], "start", user)
-
-    if action == "pause" and len(parts) >= 3:
-        return _experiment_transition(parts[2], "pause", user)
-
-    if action == "complete" and len(parts) >= 3:
-        return _experiment_transition(parts[2], "complete", user)
-
-    if action == "cancel" and len(parts) >= 3:
-        reason = parts[3] if len(parts) >= 4 else "cancelled via telegram"
-        return _experiment_cancel(parts[2], reason, user)
-
-    if action == "report" and len(parts) >= 3:
-        return _experiment_report(parts[2])
-
-    return (
-        "Experiments usage:\n"
-        "/experiments — list experiments\n"
-        "/experiments list\n"
-        "/experiments show <id>\n"
-        "/experiments ready <id>\n"
-        "/experiments start <id>\n"
-        "/experiments pause <id>\n"
-        "/experiments complete <id>\n"
-        "/experiments cancel <id> reason\n"
-        "/experiments report <id>"
-    )
-
-
-def _experiment_list() -> str:
-    from ozon_agent.experiments.repository import list_experiments
-
-    exps = list_experiments(limit=10)
-    if not exps:
-        return "No experiments found."
-    lines = [f"Experiments ({len(exps)}):", ""]
-    for exp in exps:
-        lines.append(
-            f"  {exp.id[:8]}... | SKU: {exp.sku} | "
-            f"Status: {exp.status.value} | Action: {exp.action}"
-        )
-    lines.append("")
-    lines.append("Use /experiments show <id> for details.")
-    return "\n".join(lines)
-
-
-def _experiment_show(exp_id: str) -> str:
-    from ozon_agent.experiments.experiment_summary import format_experiment_detail
-    from ozon_agent.experiments.repository import get_experiment
-
-    exp = get_experiment(exp_id)
-    if exp is None:
-        full_id = _resolve_short_experiment_id(exp_id)
-        if full_id:
-            exp = get_experiment(full_id)
-    if exp is None:
-        return f"Experiment {exp_id} not found."
-    return format_experiment_detail(exp)
-
-
-def _experiment_transition(exp_id: str, action: str, user: str) -> str:
-    from ozon_agent.experiments.workflow import (
-        mark_completed,
-        mark_paused,
-        mark_ready,
-        mark_running,
-    )
-
-    full_id = _resolve_short_experiment_id(exp_id)
-    target = full_id or exp_id
-
-    try:
-        if action == "ready":
-            exp = mark_ready(target, actor=user)
-        elif action == "start":
-            exp = mark_running(target, actor=user)
-        elif action == "pause":
-            exp = mark_paused(target, actor=user)
-        elif action == "complete":
-            exp = mark_completed(target, actor=user)
-        else:
-            return f"Unknown action: {action}"
-        return f"Experiment {exp.id[:8]}... {action}d ({exp.status.value})"
-    except Exception as e:
-        return f"Failed to {action}: {e}"
-
-
-def _experiment_cancel(exp_id: str, reason: str, user: str) -> str:
-    from ozon_agent.experiments.workflow import mark_cancelled
-
-    full_id = _resolve_short_experiment_id(exp_id)
-    target = full_id or exp_id
-    try:
-        exp = mark_cancelled(target, reason=reason, actor=user)
-        return f"Experiment {exp.id[:8]}... cancelled: {reason}"
-    except Exception as e:
-        return f"Failed to cancel: {e}"
-
-
-def _experiment_report(exp_id: str) -> str:
-    from ozon_agent.experiments.experiment_summary import format_experiment_report
-    from ozon_agent.experiments.repository import get_experiment
-
-    exp = get_experiment(exp_id)
-    if exp is None:
-        full_id = _resolve_short_experiment_id(exp_id)
-        if full_id:
-            exp = get_experiment(full_id)
-    if exp is None:
-        return f"Experiment {exp_id} not found."
-    return format_experiment_report(exp)
-
-
-def _resolve_short_experiment_id(short_id: str) -> str | None:
-    if len(short_id) >= 36:
-        return short_id
-    from ozon_agent.experiments.repository import list_experiments
-
-    exps = list_experiments(limit=100)
-    for exp in exps:
-        if exp.id.startswith(short_id):
-            return exp.id
-    return None
 
 
 def create_app(token: str) -> Any:
@@ -296,8 +137,26 @@ def create_app(token: str) -> Any:
         )
     application_builder = getattr(telegram_ext, "ApplicationBuilder")
     command_handler = getattr(telegram_ext, "CommandHandler")
+    callback_query_handler = getattr(telegram_ext, "CallbackQueryHandler")
 
-    async def recommendations_handler(update: Any, context: Any) -> None:
+    from ozon_agent.telegram.callbacks.router import route_callback
+    from ozon_agent.telegram.callbacks import (  # noqa: F401 — side-effect imports for @register
+        main_menu_cb, today_cb, business_cb, logistics_cb, ads_cb,
+        finance_cb, risks_cb, tasks_cb, experiments_cb, system_cb,
+        store_cb, quick_cb, rec_cb, owner_cb,
+    )
+    from ozon_agent.telegram.keyboards.main_menu import main_menu_keyboard
+
+    async def cmd_start(update: Any, context: Any) -> None:
+        del context
+        if update.message is None:
+            return
+        await update.message.reply_text(
+            "🏪 OZON AI — Панель управления\n\nВыберите раздел:",
+            reply_markup=main_menu_keyboard(),
+        )
+
+    async def generic_handler(update: Any, context: Any) -> None:
         del context
         if update.message is None:
             return
@@ -308,5 +167,24 @@ def create_app(token: str) -> Any:
         await update.message.reply_text(response)
 
     app = application_builder().token(token).build()
-    app.add_handler(command_handler("recommendations", recommendations_handler))
+    app.add_handler(callback_query_handler(route_callback, block=False))
+    app.add_handler(command_handler("start", cmd_start))
+    app.add_handler(command_handler("help", generic_handler))
+    app.add_handler(command_handler("status", generic_handler))
+    app.add_handler(command_handler("daily", generic_handler))
+    app.add_handler(command_handler("signals", generic_handler))
+    app.add_handler(command_handler("recommendations", generic_handler))
+    app.add_handler(command_handler("why_down", generic_handler))
+    app.add_handler(command_handler("sku", generic_handler))
+    app.add_handler(command_handler("economics", generic_handler))
+    app.add_handler(command_handler("alerts", generic_handler))
+    app.add_handler(command_handler("retro", generic_handler))
+    app.add_handler(command_handler("today", generic_handler))
+    app.add_handler(command_handler("outcomes", generic_handler))
+    app.add_handler(command_handler("outcome", generic_handler))
+    app.add_handler(command_handler("top_sku", generic_handler))
+    app.add_handler(command_handler("worst_sku", generic_handler))
+    app.add_handler(command_handler("learn", generic_handler))
+    app.add_handler(command_handler("cogs", generic_handler))
+    app.add_handler(command_handler("experiments", generic_handler))
     return app

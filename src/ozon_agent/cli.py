@@ -3383,62 +3383,23 @@ def _telegram_send_message(
 @telegram.command("run")
 @click.option("--dry-run", is_flag=True, help="Validate configuration without polling")
 def telegram_run(dry_run: bool) -> None:
-    """Run Telegram long-polling bot."""
+    """Run Telegram bot with InlineKeyboard support."""
     import os
-    import time
-    import urllib.parse
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     if not token:
         raise click.ClickException("TELEGRAM_BOT_TOKEN is not configured")
-    config = _telegram_runtime_config_from_env()
-    opener = _build_telegram_opener(config.proxy_url)
+
     if dry_run:
         console.print("[green]Telegram bot configuration OK[/]")
-        console.print(f"Timeout: {config.request_timeout}s")
-        console.print(f"Retry attempts: {config.retry_attempts}")
-        console.print(f"Retry backoff: {config.retry_backoff_seconds}s")
-        console.print(f"Proxy: {_mask_proxy_url(config.proxy_url)}")
+        console.print(f"Token: {token[:8]}...")
         return
 
-    from .telegram.bot import handle_message
+    from .telegram.bot import create_app
 
-    base_url = f"https://api.telegram.org/bot{token}"
-    offset = 0
-    console.print("[green]Telegram bot polling started[/]")
-    while True:
-        try:
-            params = urllib.parse.urlencode({"timeout": 30, "offset": offset})
-            payload = _telegram_api_json(
-                opener,
-                f"{base_url}/getUpdates?{params}",
-                timeout=config.request_timeout + 10,
-                attempts=config.retry_attempts,
-                backoff_seconds=config.retry_backoff_seconds,
-                action="getUpdates",
-            )
-            for update in payload.get("result", []):
-                offset = max(offset, int(update.get("update_id", 0)) + 1)
-                message = update.get("message") or {}
-                text = str(message.get("text") or "").strip()
-                chat = message.get("chat") or {}
-                chat_id = chat.get("id")
-                user = str((message.get("from") or {}).get("username") or "telegram")
-                if not text or chat_id is None:
-                    continue
-                command = text.split(maxsplit=1)[0]
-                console.print(f"[cyan]Telegram received command: {escape(command)}[/]")
-                reply = handle_message(text, user=user)
-                console.print(f"[cyan]Telegram handled command: {escape(command)}[/]")
-                _telegram_send_message(opener, base_url, chat_id, reply, config)
-        except KeyboardInterrupt:
-            raise
-        except Exception as exc:
-            console.print(
-                "[yellow]Telegram polling warning after retries: "
-                f"{escape(type(exc).__name__)}[/]"
-            )
-            time.sleep(max(config.retry_backoff_seconds, 10))
+    console.print("[green]Telegram bot starting with InlineKeyboard support...[/]")
+    app = create_app(token)
+    app.run_polling(drop_pending_updates=True)
 
 
 @main.group("reconcile")
