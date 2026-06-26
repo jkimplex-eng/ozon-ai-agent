@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import click
+from dotenv import load_dotenv
+load_dotenv("/root/ozon-ai-agent/.env")
 from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
@@ -3576,5 +3578,11 @@ def ranking_top_factors_cmd(sku: str, limit: int) -> None:
     ranking_top_factors(sku, limit=limit)
 
 
+# === SUPPLY MODULE ===
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "cli"))
+from supply import supply as supply_group
+main.add_command(supply_group, "supply")
 if __name__ == "__main__":
     main()
