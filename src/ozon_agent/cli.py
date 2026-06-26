@@ -3397,8 +3397,11 @@ def telegram_run(dry_run: bool) -> None:
 
     from .telegram.bot import create_app
 
+    proxy_url = os.environ.get("TELEGRAM_PROXY_URL", "").strip() or None
     console.print("[green]Telegram bot starting with InlineKeyboard support...[/]")
-    app = create_app(token)
+    if proxy_url:
+        console.print(f"[cyan]Using proxy: {proxy_url[:20]}...[/]")
+    app = create_app(token, proxy_url=proxy_url)
     app.run_polling(drop_pending_updates=True)
 
 

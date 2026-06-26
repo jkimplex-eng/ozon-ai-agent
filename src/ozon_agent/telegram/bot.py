@@ -127,9 +127,12 @@ def _handle_message(text: str, user: str) -> str:
     )
 
 
-def create_app(token: str) -> Any:
+def create_app(token: str, proxy_url: str | None = None) -> Any:
+    import os
+
     try:
         telegram_ext = importlib.import_module("telegram.ext")
+        telegram_request = importlib.import_module("telegram.request")
     except ImportError:
         raise ImportError(
             "python-telegram-bot is required. Install with: "
@@ -138,6 +141,8 @@ def create_app(token: str) -> Any:
     application_builder = getattr(telegram_ext, "ApplicationBuilder")
     command_handler = getattr(telegram_ext, "CommandHandler")
     callback_query_handler = getattr(telegram_ext, "CallbackQueryHandler")
+
+    effective_proxy = proxy_url or os.environ.get("TELEGRAM_PROXY_URL", "").strip() or None
 
     from ozon_agent.telegram.callbacks.router import route_callback
     from ozon_agent.telegram.callbacks import (  # noqa: F401 — side-effect imports for @register
@@ -166,7 +171,20 @@ def create_app(token: str) -> Any:
         response = handle_message(text, username)
         await update.message.reply_text(response)
 
-    app = application_builder().token(token).build()
+    builder = application_builder().token(token)
+
+    if effective_proxy:
+        from urllib.parse import urlsplit
+        parsed = urlsplit(effective_proxy)
+        proxy_str = f"{parsed.hostname}:{parsed.port}" if parsed.port else parsed.hostname
+        httpx_request = getattr(telegram_request, "HTTPXRequest", None)
+        if httpx_request:
+            import httpx
+            transport = httpx.AsyncHTTPTransport(proxy=effective_proxy)
+            request_obj = httpx_request(httpx_client=httpx.AsyncClient(transport=transport, proxy=None))
+            builder = builder.request(request_obj)
+
+    app = builder.build()
     app.add_handler(callback_query_handler(route_callback, block=False))
     app.add_handler(command_handler("start", cmd_start))
     app.add_handler(command_handler("help", generic_handler))
