@@ -39,7 +39,7 @@ def sync_products(client: OzonClient) -> int:
 
         product_ids = [item["product_id"] for item in items]
         info_result = client.get_product_info(product_ids)
-        products = info_result.get("result", {}).get("items", [])
+        products = info_result.get("items", []) if "items" in info_result else info_result.get("result", {}).get("items", [])
 
         rows = []
         for p in products:
@@ -95,7 +95,7 @@ def sync_orders(client: OzonClient, date_from: datetime, date_to: datetime) -> i
                 result = client.get_orders(
                     date_from, date_to, limit=100, offset=offset, scheme=scheme
                 )
-                postings = result.get("result", {}).get("postings", [])
+                postings = result.get("postings", []) if "postings" in result else result.get("result", {}).get("postings", [])
 
                 if not postings:
                     break
@@ -111,8 +111,8 @@ def sync_orders(client: OzonClient, date_from: datetime, date_to: datetime) -> i
                             product.get("offer_id", ""),
                             str(product.get("sku", "")),
                             product.get("quantity", 1),
-                            float(product.get("price", 0)),
-                            float(product.get("price", 0)),
+                            float(product.get("price", {}).get("amount", 0)) if isinstance(product.get("price"), dict) else float(product.get("price", 0)),
+                            float(product.get("price", {}).get("amount", 0)) if isinstance(product.get("price"), dict) else float(product.get("price", 0)),
                             order.get("status", ""),
                             scheme,
                             analytics.get("region", ""),
@@ -154,8 +154,14 @@ def sync_finance(client: OzonClient, date_from: datetime, date_to: datetime) -> 
     source = "finance"
     log_etl(source, "running")
     try:
-        result = client.get_finance_operations(date_from, date_to)
-        operations = result.get("result", {}).get("operations", [])
+        all_operations = []
+        current_start = date_from
+        while current_start < date_to:
+            current_end = min(current_start + timedelta(days=30), date_to)
+            result = client.get_finance_operations(current_start, current_end)
+            all_operations.extend(result.get("result", {}).get("operations", []))
+            current_start = current_end + timedelta(days=1)
+        operations = all_operations
 
         daily_totals = {}
         for op in operations:
@@ -174,13 +180,13 @@ def sync_finance(client: OzonClient, date_from: datetime, date_to: datetime) -> 
             op_type = op.get("operation_type", "")
             services = op.get("services", [])
 
-            if "Продажи" in op_type or "sale" in op_type.lower():
+            if "DeliveredToCustomer" in op_type or "Продажи" in op_type or "sale" in op_type.lower():
                 daily_totals[op_date]["sales"] += amount
-            elif "Возврат" in op_type or "return" in op_type.lower():
-                daily_totals[op_date]["returns"] += amount
-            elif "Комиссия" in op_type:
+            elif "Return" in op_type or "Возврат" in op_type:
+                daily_totals[op_date]["returns"] += abs(amount)
+            elif "Commission" in op_type or "Комиссия" in op_type:
                 daily_totals[op_date]["commission"] += abs(amount)
-            elif "Логистика" in op_type:
+            elif "Logistic" in op_type or "Логистика" in op_type or "Packaging" in op_type:
                 daily_totals[op_date]["logistics"] += abs(amount)
 
             for svc in services:

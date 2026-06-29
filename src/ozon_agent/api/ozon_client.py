@@ -1,5 +1,7 @@
 """Ozon Seller API client."""
 import os
+from dotenv import load_dotenv
+load_dotenv()
 from datetime import datetime
 from typing import Any
 
@@ -31,14 +33,14 @@ class OzonClient:
         return response.json()  # type: ignore[no-any-return]
 
     def get_products(self, limit: int = 1000, page: int = 1) -> dict[str, Any]:
-        return self._post("/v2/product/list", {
+        return self._post("/v3/product/list", {
             "filter": {},
             "last_id": "",
             "limit": limit,
         })
 
     def get_product_info(self, product_ids: list[int]) -> dict[str, Any]:
-        return self._post("/v2/product/info/list", {
+        return self._post("/v3/product/info/list", {
             "product_id": product_ids,
         })
 
@@ -66,8 +68,8 @@ class OzonClient:
         return self._post(f"/v3/posting/{scheme.lower()}/list", {
             "dir": "ASC",
             "filter": {
-                "since": date_from.isoformat(),
-                "to": date_to.isoformat(),
+                "since": date_from.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "to": date_to.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 **({"status": status} if status else {}),
             },
             "limit": limit,

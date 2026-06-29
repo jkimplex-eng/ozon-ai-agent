@@ -59,11 +59,11 @@ def _load_from_db() -> pd.DataFrame | None:
     df["orders"] = 0
     df["cogs"] = 0
     df["gross_profit"] = (
-        df["revenue"] - df["commission"] - df["logistics"]
-        - df["advertising"] - df["partner_services"] - df["fbo_services"]
+        df["revenue"].astype(float) - df["commission"].astype(float) - df["logistics"].astype(float)
+        - df["advertising"].astype(float) - df["partner_services"].astype(float) - df["fbo_services"].astype(float)
     ).round(2)
     df["margin"] = (
-        (df["gross_profit"] / df["revenue"].replace(0, float("nan")) * 100).round(2)
+        (df["gross_profit"].astype(float) / df["revenue"].replace(0, float("nan")).astype(float) * 100).round(2)
     ).fillna(0)
     df["plan_vp"] = PLAN_VP_PER_DAY
     df["deviation"] = (df["gross_profit"] - df["plan_vp"]).round(2)
@@ -136,7 +136,7 @@ def _load_from_files() -> pd.DataFrame | None:
     df["cogs"] = 0
     df["gross_profit"] = (df["revenue"] - df["advertising"]).round(2)
     df["margin"] = (
-        (df["gross_profit"] / df["revenue"].replace(0, float("nan")) * 100).round(2)
+        (df["gross_profit"].astype(float) / df["revenue"].replace(0, float("nan")).astype(float) * 100).round(2)
     ).fillna(0)
     df["plan_vp"] = PLAN_VP_PER_DAY
     df["deviation"] = (df["gross_profit"] - df["plan_vp"]).round(2)
