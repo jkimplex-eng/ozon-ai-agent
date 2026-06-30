@@ -1,8 +1,12 @@
 """FBO demand planning by cluster."""
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
+from datetime import datetime
 from math import ceil
+from pathlib import Path
 from typing import Any
 
 from ozon_agent.api.ozon_client import OzonClient
@@ -11,6 +15,10 @@ from ozon_agent.supply.client import SupplyAPIClient
 from ozon_agent.supply.models import Warehouse
 
 DEFAULT_HORIZONS = (30, 60, 90)
+DATA_ROOT = Path("data")
+ANALYTICS_DATA_PATH = DATA_ROOT / "analytics" / "analytics_data.json"
+WAREHOUSE_STOCKS_PATH = DATA_ROOT / "stocks" / "warehouse_stocks.json"
+CURRENT_STOCKS_PATH = DATA_ROOT / "stocks" / "current_stocks.json"
 
 
 @dataclass(frozen=True)
@@ -110,7 +118,7 @@ def build_fbo_demand_plans(
         avg_daily_sales = total_sales / days_with_sales
         shares = _cluster_shares(sku, cluster_targets, stock_index)
         for cluster_id, warehouse in cluster_targets.items():
-            current_stock = stock_index.get((sku, warehouse.name.lower()), 0)
+            current_stock = stock_index.get((sku, _normalize_warehouse_name(warehouse.name)), 0)
             share = shares.get(cluster_id, 0.0)
             plans.append(
                 _build_one_plan(
@@ -141,13 +149,20 @@ def _build_one_plan(
     recommended = {horizon: max(0, demand[horizon] - current_stock) for horizon in DEFAULT_HORIZONS}
     stock_days = current_stock / cluster_daily_sales if cluster_daily_sales > 0 else None
     confidence = _confidence(days_with_sales, total_sales, cluster_share)
+    note = str(product.get("data_quality_note") or "") or (
+        "Cluster demand is estimated from SKU sales and warehouse stock distribution; "
+        "database has no direct cluster-level sales table."
+    )
+    sources = list(product.get("data_sources") or ["products", "sales", "stocks", "supply_warehouses"])
+    if "supply_warehouses" not in sources:
+        sources.append("supply_warehouses")
 
     return FboDemandPlan(
         sku=str(product.get("sku") or ""),
         offer_id=str(product.get("offer_id") or ""),
-        product_name=str(product.get("name") or ""),
-        cluster_id=warehouse.cluster_id or "unknown",
-        cluster_name=warehouse.cluster_name or "Unknown",
+        product_name=str(product.get("name") or product.get("product_name") or ""),
+        cluster_id=warehouse.cluster_id or f"warehouse:{warehouse.warehouse_id}",
+        cluster_name=warehouse.cluster_name or warehouse.name,
         warehouse_id=warehouse.warehouse_id,
         warehouse_name=warehouse.name,
         avg_daily_sales=round(cluster_daily_sales, 2),
@@ -161,15 +176,23 @@ def _build_one_plan(
         recommended_60=recommended[60],
         recommended_90=recommended[90],
         confidence=confidence,
-        data_sources=["products", "sales", "stocks", "supply_warehouses"],
-        data_quality_note=(
-            "Cluster demand is estimated from SKU sales and warehouse stock distribution; "
-            "database has no direct cluster-level sales table."
-        ),
+        data_sources=sources,
+        data_quality_note=note,
     )
 
 
 def _load_product_sales(skus: list[str] | None, lookback_days: int, limit: int) -> list[dict[str, Any]]:
+    db_rows = _load_product_sales_from_db(skus=skus, lookback_days=lookback_days, limit=limit)
+    if db_rows:
+        return db_rows
+    return _load_product_sales_from_files(skus=skus, lookback_days=lookback_days, limit=limit)
+
+
+def _load_product_sales_from_db(
+    skus: list[str] | None,
+    lookback_days: int,
+    limit: int,
+) -> list[dict[str, Any]]:
     params: list[Any] = [lookback_days]
     sku_filter = ""
     if skus:
@@ -177,62 +200,212 @@ def _load_product_sales(skus: list[str] | None, lookback_days: int, limit: int) 
         params.append([str(sku) for sku in skus])
     params.append(limit)
 
-    return execute_query(
-        f"""
-        SELECT
-            p.sku,
-            p.offer_id,
-            p.name,
-            COALESCE(SUM(s.quantity), 0) AS total_sales,
-            COUNT(DISTINCT s.date) AS days_with_sales
-        FROM products p
-        JOIN sales s ON s.product_id = p.id
-        WHERE s.date >= CURRENT_DATE - (%s::int * INTERVAL '1 day')
-          {sku_filter}
-        GROUP BY p.id, p.sku, p.offer_id, p.name
-        HAVING COALESCE(SUM(s.quantity), 0) > 0
-        ORDER BY COALESCE(SUM(s.quantity), 0) DESC
-        LIMIT %s
-        """,
-        tuple(params),
-    )
+    try:
+        return execute_query(
+            f"""
+            SELECT
+                p.sku,
+                p.offer_id,
+                p.name,
+                COALESCE(SUM(s.quantity), 0) AS total_sales,
+                COUNT(DISTINCT s.date) AS days_with_sales,
+                ARRAY['products','sales'] AS data_sources,
+                'Demand based on PostgreSQL sales history.' AS data_quality_note
+            FROM products p
+            JOIN sales s ON s.product_id = p.id
+            WHERE s.date >= CURRENT_DATE - (%s::int * INTERVAL '1 day')
+              {sku_filter}
+            GROUP BY p.id, p.sku, p.offer_id, p.name
+            HAVING COALESCE(SUM(s.quantity), 0) > 0
+            ORDER BY COALESCE(SUM(s.quantity), 0) DESC
+            LIMIT %s
+            """,
+            tuple(params),
+        )
+    except Exception:
+        return []
+
+
+def _load_product_sales_from_files(
+    skus: list[str] | None,
+    lookback_days: int,
+    limit: int,
+) -> list[dict[str, Any]]:
+    rows = _read_json_rows(ANALYTICS_DATA_PATH)
+    if not rows:
+        return []
+
+    sku_filter = {str(sku) for sku in skus} if skus else None
+    catalog = _load_product_catalog()
+    result: list[dict[str, Any]] = []
+
+    for row in rows:
+        sku = str(row.get("sku") or "").strip()
+        if not sku or (sku_filter and sku not in sku_filter):
+            continue
+
+        total_sales = int(row.get("ordered_units") or row.get("orders") or row.get("quantity") or 0)
+        if total_sales <= 0:
+            continue
+
+        product_info = catalog.get(sku, {})
+        days_with_sales = _period_days(row.get("date_from"), row.get("date_to"), lookback_days)
+        result.append(
+            {
+                "sku": sku,
+                "offer_id": str(product_info.get("offer_id") or row.get("offer_id") or ""),
+                "name": str(product_info.get("name") or row.get("product_name") or ""),
+                "total_sales": total_sales,
+                "days_with_sales": days_with_sales,
+                "data_sources": ["analytics_data.json"],
+                "data_quality_note": (
+                    "Demand is estimated from analytics_data.json period totals; "
+                    "cluster allocation still uses warehouse stock distribution."
+                ),
+            }
+        )
+
+    result.sort(key=lambda item: (-float(item["total_sales"]), item["sku"]))
+    return result[:limit]
 
 
 def _load_stock_by_warehouse(skus: list[str]) -> list[dict[str, Any]]:
     if not skus:
         return []
-    return execute_query(
-        """
-        WITH latest AS (
+    db_rows = _load_stock_by_warehouse_from_db(skus)
+    if db_rows:
+        return db_rows
+    return _load_stock_by_warehouse_from_files(skus)
+
+
+def _load_stock_by_warehouse_from_db(skus: list[str]) -> list[dict[str, Any]]:
+    try:
+        return execute_query(
+            """
+            WITH latest AS (
+                SELECT
+                    st.product_id,
+                    COALESCE(st.warehouse, '') AS warehouse,
+                    st.stock_total,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY st.product_id, COALESCE(st.warehouse, '')
+                        ORDER BY st.recorded_at DESC
+                    ) AS rn
+                FROM stocks st
+            )
             SELECT
-                st.product_id,
-                COALESCE(st.warehouse, '') AS warehouse,
-                st.stock_total,
-                ROW_NUMBER() OVER (
-                    PARTITION BY st.product_id, COALESCE(st.warehouse, '')
-                    ORDER BY st.recorded_at DESC
-                ) AS rn
-            FROM stocks st
+                p.sku,
+                latest.warehouse AS warehouse_name,
+                COALESCE(SUM(latest.stock_total), 0) AS current_stock
+            FROM latest
+            JOIN products p ON p.id = latest.product_id
+            WHERE latest.rn = 1
+              AND p.sku = ANY(%s)
+            GROUP BY p.sku, latest.warehouse
+            """,
+            (skus,),
         )
-        SELECT
-            p.sku,
-            latest.warehouse AS warehouse_name,
-            COALESCE(SUM(latest.stock_total), 0) AS current_stock
-        FROM latest
-        JOIN products p ON p.id = latest.product_id
-        WHERE latest.rn = 1
-          AND p.sku = ANY(%s)
-        GROUP BY p.sku, latest.warehouse
-        """,
-        (skus,),
-    )
+    except Exception:
+        return []
+
+
+def _load_stock_by_warehouse_from_files(skus: list[str]) -> list[dict[str, Any]]:
+    sku_filter = set(skus)
+    rows = _read_json_rows(WAREHOUSE_STOCKS_PATH)
+    if rows:
+        result = []
+        for row in rows:
+            sku = str(row.get("sku") or "")
+            if sku not in sku_filter:
+                continue
+            current_stock = int(row.get("free_to_sell") or 0)
+            if current_stock < 0:
+                continue
+            result.append(
+                {
+                    "sku": sku,
+                    "warehouse_name": str(row.get("warehouse_name") or ""),
+                    "current_stock": current_stock,
+                }
+            )
+        if result:
+            return result
+
+    rows = _read_json_rows(CURRENT_STOCKS_PATH)
+    result = []
+    for row in rows:
+        sku = str(row.get("sku") or "")
+        if sku not in sku_filter:
+            continue
+        result.append(
+            {
+                "sku": sku,
+                "warehouse_name": "UNALLOCATED_FBO",
+                "current_stock": int(row.get("fbo_present") or row.get("total_present") or 0),
+            }
+        )
+    return result
+
+
+def _load_product_catalog() -> dict[str, dict[str, str]]:
+    catalog: dict[str, dict[str, str]] = {}
+    try:
+        for row in execute_query("SELECT sku, offer_id, name FROM products"):
+            sku = str(row.get("sku") or "").strip()
+            if sku:
+                catalog[sku] = {
+                    "offer_id": str(row.get("offer_id") or ""),
+                    "name": str(row.get("name") or ""),
+                }
+    except Exception:
+        pass
+
+    for row in _read_json_rows(CURRENT_STOCKS_PATH):
+        sku = str(row.get("sku") or "").strip()
+        if sku and sku not in catalog:
+            catalog[sku] = {
+                "offer_id": str(row.get("offer_id") or ""),
+                "name": str(row.get("product_name") or ""),
+            }
+    return catalog
+
+
+def _read_json_rows(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+    rows = raw.get("rows") if isinstance(raw, dict) else raw
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def _period_days(date_from: Any, date_to: Any, fallback_days: int) -> int:
+    start = _parse_date(date_from)
+    end = _parse_date(date_to)
+    if not start or not end:
+        return max(1, min(30, fallback_days))
+    return max(1, min(fallback_days, (end.date() - start.date()).days + 1))
+
+
+def _parse_date(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _index_stock(stock_rows: list[dict[str, Any]]) -> dict[tuple[str, str], int]:
     index: dict[tuple[str, str], int] = {}
     for row in stock_rows:
         sku = str(row.get("sku") or "")
-        warehouse_name = str(row.get("warehouse_name") or "").lower()
+        warehouse_name = _normalize_warehouse_name(str(row.get("warehouse_name") or ""))
         index[(sku, warehouse_name)] = int(row.get("current_stock") or 0)
     return index
 
@@ -251,7 +424,7 @@ def _cluster_shares(
     stock_index: dict[tuple[str, str], int],
 ) -> dict[str, float]:
     stocks = {
-        cluster_id: stock_index.get((sku, warehouse.name.lower()), 0)
+        cluster_id: stock_index.get((sku, _normalize_warehouse_name(warehouse.name)), 0)
         for cluster_id, warehouse in cluster_targets.items()
     }
     total_stock = sum(stocks.values())
@@ -260,6 +433,10 @@ def _cluster_shares(
 
     equal_share = 1 / len(cluster_targets)
     return {cluster_id: equal_share for cluster_id in cluster_targets}
+
+
+def _normalize_warehouse_name(value: str) -> str:
+    return re.sub(r"[\W_]+", "", value, flags=re.UNICODE).casefold()
 
 
 def _confidence(days_with_sales: int, total_sales: float, cluster_share: float) -> float:
