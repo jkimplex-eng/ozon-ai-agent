@@ -1,5 +1,6 @@
 """Supply Proposal Manager - handles proposal lifecycle."""
 import logging
+import time
 import uuid
 from datetime import datetime
 from typing import Any
@@ -43,6 +44,7 @@ class ProposalManager:
 
             draft_payload = {
                 "warehouse_id": plan["target_warehouse_id"],
+                "cluster_id": str(plan["target_cluster_id"]),
                 "items": [
                     {
                         "sku": plan["sku"],
@@ -59,7 +61,7 @@ class ProposalManager:
                 quantity=plan["quantity"],
                 target_warehouse_id=plan["target_warehouse_id"],
                 target_warehouse_name=plan["target_warehouse_name"],
-                target_cluster_id=plan["target_cluster_id"],
+                target_cluster_id=str(plan["target_cluster_id"]),
                 target_cluster_name=plan["target_cluster_name"],
                 reason=plan["reason"],
                 expected_prevented_loss=plan["expected_prevented_loss"],
@@ -134,7 +136,7 @@ class ProposalManager:
         return f"Proposal {proposal_id} rejected"
 
     def create_draft(self, proposal_id: str) -> str:
-        """Create draft from approved proposal (MUTATION)."""
+        """Create draft and supply order from approved proposal (MUTATION)."""
         proposal = get_proposal(proposal_id)
 
         if not proposal:
@@ -145,29 +147,41 @@ class ProposalManager:
                 f"Proposal must be approved first. Current status: {proposal.status.value}"
             )
 
-        if not proposal.draft_payload:
-            raise ValueError("Proposal has no draft payload")
-
+        cluster_id = self._resolve_cluster_id(proposal)
         payload = DraftPayload(
-            warehouse_id=proposal.draft_payload["warehouse_id"],
-            items=proposal.draft_payload["items"],
+            warehouse_id=int(proposal.target_warehouse_id),
+            cluster_id=cluster_id,
+            items=[{"sku": int(proposal.sku), "quantity": int(proposal.quantity)}],
         )
 
         try:
-            response = self._supply_client.create_draft(payload)
-            draft_id = response.get("result", {}).get("draft_id")
-
+            draft_response = self._supply_client.create_draft(payload)
+            draft_id = str(draft_response.get("draft_id") or draft_response.get("result", {}).get("draft_id") or "")
             if not draft_id:
-                raise RuntimeError(f"No draft_id in response: {response}")
+                raise RuntimeError(f"No draft_id in response: {draft_response}")
+
+            self._supply_client.create_supply_from_draft(
+                draft_id=draft_id,
+                cluster_id=cluster_id,
+                warehouse_id=int(proposal.target_warehouse_id),
+            )
+            supply_id = self._wait_for_supply_order(draft_id)
 
             update_proposal_status(
                 proposal_id=proposal_id,
                 status=ProposalStatus.DRAFT_CREATED,
                 draft_id=draft_id,
+                supply_id=supply_id,
+                draft_payload=payload.to_api_dict(),
             )
 
-            logger.info(f"Draft created: {draft_id} for proposal {proposal_id}")
-            return f"Draft created: {draft_id}"
+            logger.info(
+                "Draft %s and supply order %s created for proposal %s",
+                draft_id,
+                supply_id,
+                proposal_id,
+            )
+            return f"Draft created: {draft_id}; supply order created: {supply_id}"
 
         except Exception as e:
             update_proposal_status(
@@ -178,7 +192,7 @@ class ProposalManager:
             raise
 
     def create_supply(self, proposal_id: str, timeslot_id: str) -> str:
-        """Create supply from draft with selected timeslot (MUTATION)."""
+        """Reserve timeslot for already created supply order (MUTATION)."""
         proposal = get_proposal(proposal_id)
 
         if not proposal:
@@ -189,30 +203,29 @@ class ProposalManager:
                 f"Proposal must have draft created. Current status: {proposal.status.value}"
             )
 
-        if not proposal.draft_id:
-            raise ValueError("Proposal has no draft_id")
+        if not proposal.supply_id:
+            raise ValueError("Proposal has no supply_id")
 
         try:
-            response = self._supply_client.create_supply_from_draft(
-                draft_id=proposal.draft_id,
+            response = self._supply_client.reserve_supply_timeslot(
+                supply_order_id=str(proposal.supply_id),
                 timeslot_id=timeslot_id,
             )
+            operation_id = str(response.get("operation_id") or response.get("result", {}).get("operation_id") or "")
+            if not operation_id:
+                raise RuntimeError(f"No operation_id in response: {response}")
 
-            task_id = response.get("result", {}).get("task_id")
-            if not task_id:
-                raise RuntimeError(f"No task_id in response: {response}")
-
-            supply_id = self._wait_for_supply(task_id)
+            self._wait_for_timeslot_status(operation_id)
 
             update_proposal_status(
                 proposal_id=proposal_id,
                 status=ProposalStatus.SUPPLY_CREATED,
-                supply_id=supply_id,
+                supply_id=proposal.supply_id,
                 timeslot_id=timeslot_id,
             )
 
-            logger.info(f"Supply created: {supply_id} for proposal {proposal_id}")
-            return f"Supply created: {supply_id}"
+            logger.info("Supply %s booked for proposal %s", proposal.supply_id, proposal_id)
+            return f"Supply booked: {proposal.supply_id}"
 
         except Exception as e:
             update_proposal_status(
@@ -222,30 +235,52 @@ class ProposalManager:
             )
             raise
 
-    def _wait_for_supply(self, task_id: str, max_wait: int = 60) -> str:
-        """Wait for supply creation to complete."""
-        import time
+    def _resolve_cluster_id(self, proposal: SupplyProposal) -> str:
+        try:
+            return str(int(str(proposal.target_cluster_id)))
+        except ValueError:
+            resolved = self._supply_client.resolve_cluster_for_warehouse(int(proposal.target_warehouse_id))
+            if not resolved:
+                raise RuntimeError(
+                    f"Could not resolve macrolocal cluster for warehouse {proposal.target_warehouse_id}"
+                )
+            return resolved[0]
 
+    def _wait_for_supply_order(self, draft_id: str, max_wait: int = 60) -> str:
         start_time = time.time()
 
         while time.time() - start_time < max_wait:
-            status_response = self._client._post(
-                "/v1/draft/supply/create/status",
-                {"task_id": task_id},
-            )
+            status_response = self._supply_client.get_supply_create_status(draft_id)
+            status = str(status_response.get("status") or "")
 
-            status = status_response.get("result", {}).get("status")
+            if status == "SUCCESS":
+                order_id = status_response.get("order_id")
+                if order_id:
+                    return str(order_id)
+                raise RuntimeError("Supply creation completed but no order_id")
 
-            if status == "completed":
-                supply_id = status_response.get("result", {}).get("supply_id")
-                if supply_id:
-                    return supply_id
-                raise RuntimeError("Supply creation completed but no supply_id")
-
-            elif status == "failed":
-                error = status_response.get("result", {}).get("error", "Unknown")
-                raise RuntimeError(f"Supply creation failed: {error}")
+            if status == "FAILED":
+                reasons = status_response.get("error_reasons") or []
+                raise RuntimeError(f"Supply creation failed: {reasons}")
 
             time.sleep(2)
 
-        raise RuntimeError(f"Timeout waiting for supply creation (task_id: {task_id})")
+        raise RuntimeError(f"Timeout waiting for supply creation (draft_id: {draft_id})")
+
+    def _wait_for_timeslot_status(self, operation_id: str, max_wait: int = 60) -> None:
+        start_time = time.time()
+
+        while time.time() - start_time < max_wait:
+            status_response = self._supply_client.get_supply_timeslot_status(operation_id)
+            status = str(status_response.get("status") or "")
+
+            if status == "STATUS_SUCCESS":
+                return
+
+            if status == "STATUS_FAILED":
+                reasons = status_response.get("errors") or []
+                raise RuntimeError(f"Timeslot reservation failed: {reasons}")
+
+            time.sleep(2)
+
+        raise RuntimeError(f"Timeout waiting for timeslot reservation (operation_id: {operation_id})")

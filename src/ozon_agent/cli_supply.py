@@ -435,11 +435,23 @@ def create_draft(proposal_id: str, execute: bool) -> None:
 @click.argument("draft_id")
 def timeslots(draft_id: str) -> None:
     """Show available timeslots for draft."""
+    from ozon_agent.supply.repository import get_proposal_by_draft_id
+
     client = create_client()
     supply_client = SupplyAPIClient(client)
 
     try:
-        timeslots_list = supply_client.get_timeslots(draft_id)
+        proposal = get_proposal_by_draft_id(draft_id)
+        if not proposal:
+            click.echo(f"❌ Proposal not found for draft_id: {draft_id}")
+            raise click.Abort()
+
+        timeslots_list = supply_client.get_timeslots(
+            draft_id,
+            cluster_id=proposal.target_cluster_id,
+            warehouse_id=int(proposal.target_warehouse_id),
+            supply_order_id=str(proposal.supply_id) if proposal.supply_id else None,
+        )
 
         click.echo(f"\n🕐 Available Timeslots for Draft {draft_id}")
         click.echo("=" * 80)
@@ -482,6 +494,7 @@ def select_timeslot(proposal_id: str, timeslot_id: str, execute: bool) -> None:
     except Exception as e:
         click.echo(f"❌ Error: {e}", err=True)
         raise click.Abort()
+
 
 
 

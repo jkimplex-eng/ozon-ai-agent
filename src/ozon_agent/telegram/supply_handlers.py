@@ -9,7 +9,7 @@ from ozon_agent.supply.fbo import FboPlanningEngine
 from ozon_agent.supply.planning import SupplyPlanningEngine
 from ozon_agent.supply.proposals import ProposalManager
 from ozon_agent.supply.models import ProposalStatus
-from ozon_agent.supply.repository import list_proposals
+from ozon_agent.supply.repository import get_proposal_by_draft_id, list_proposals
 
 logger = logging.getLogger(__name__)
 
@@ -265,17 +265,26 @@ def _supply_create_draft(proposal_id: str) -> str:
 
 def _supply_timeslots(draft_id: str) -> str:
     try:
+        proposal = get_proposal_by_draft_id(draft_id)
+        if not proposal:
+            return f"No proposal found for draft {draft_id}."
+
         client = create_client()
         supply_client = SupplyAPIClient(client)
-        timeslots = supply_client.get_timeslots(draft_id)
-        
+        timeslots = supply_client.get_timeslots(
+            draft_id,
+            cluster_id=proposal.target_cluster_id,
+            warehouse_id=int(proposal.target_warehouse_id),
+            supply_order_id=str(proposal.supply_id) if proposal.supply_id else None,
+        )
+
         if not timeslots:
             return f"No timeslots available for draft {draft_id}."
-        
+
         lines = [f"Timeslots for {draft_id}:\n"]
         for ts in timeslots[:5]:
             lines.append(f"  {ts.timeslot_id}: {ts.date} {ts.time_from}-{ts.time_to}")
-        
+
         return "\n".join(lines)
     except Exception as e:
         return f"Error: {e}"
@@ -324,6 +333,7 @@ def _handle_supply(parts: list[str]) -> str:
         return _supply_select_timeslot(parts[2], parts[3])
     else:
         return _supply_help()
+
 
 
 

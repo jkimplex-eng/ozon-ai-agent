@@ -137,6 +137,23 @@ def get_proposal(proposal_id: str) -> SupplyProposal | None:
             return _proposal_from_row(row) if row else None
 
 
+def get_proposal_by_draft_id(draft_id: str) -> SupplyProposal | None:
+    """Get proposal by draft ID."""
+    query = f"""
+        SELECT {", ".join(PROPOSAL_COLUMNS)}
+        FROM supply_proposals
+        WHERE draft_id = %s
+        ORDER BY created_at DESC
+        LIMIT 1
+    """
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, (draft_id,))
+            row = cur.fetchone()
+            return _proposal_from_row(row) if row else None
+
+
 def list_proposals(
     status: ProposalStatus | None = None,
     limit: int = 50,

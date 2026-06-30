@@ -86,16 +86,21 @@ class Timeslot:
 
 @dataclass
 class DraftPayload:
-    """Payload for draft creation."""
+    """Payload for direct draft creation."""
 
     warehouse_id: int
+    cluster_id: str
     items: list[dict[str, Any]]
+    deletion_sku_mode: int = 1
 
     def to_api_dict(self) -> dict[str, Any]:
-        """Convert to API request format."""
+        """Convert to Ozon direct-draft request format."""
         return {
-            "warehouse_id": self.warehouse_id,
-            "items": self.items,
+            "deletion_sku_mode": self.deletion_sku_mode,
+            "cluster_info": {
+                "macrolocal_cluster_id": int(self.cluster_id),
+                "items": self.items,
+            },
         }
 
 
