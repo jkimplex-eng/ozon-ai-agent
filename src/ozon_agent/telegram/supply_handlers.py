@@ -60,9 +60,12 @@ def _render_cluster_lines(items: list[tuple[str, str, int]], title: str) -> str:
 
     lines = [title, ""]
     for cluster_name in sorted(grouped):
-        lines.append(f"{cluster_name}")
-        for label, qty in sorted(grouped[cluster_name], key=lambda row: (-row[1], row[0]))[:12]:
-            lines.append(f"- {label} - {qty} шт")
+        cluster_items = sorted(grouped[cluster_name], key=lambda row: (-row[1], row[0]))
+        sku_count = len(cluster_items)
+        total_qty = sum(qty for _label, qty in cluster_items)
+        lines.append(f"{cluster_name} — {sku_count} SKU, всего {total_qty} шт")
+        for label, qty in cluster_items[:12]:
+            lines.append(f"- {label} — {qty}")
         lines.append("")
     return "\n".join(lines).strip()
 
@@ -479,3 +482,4 @@ def _handle_supply(parts: list[str]) -> str:
         return _supply_select_timeslot(parts[2], parts[3])
     else:
         return _supply_help()
+

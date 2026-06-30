@@ -126,6 +126,6 @@ def test_supply_proposals_groups_by_cluster_and_offer() -> None:
         from ozon_agent.telegram.supply_handlers import _supply_proposals
         text = _supply_proposals()
 
-    assert "Москва" in text
-    assert "SJ11 - 70 шт" in text
-    assert "SJ28 - 30 шт" in text
+    assert "Москва — 2 SKU, всего 100 шт" in text
+    assert "SJ11 — 70" in text
+    assert "SJ28 — 30" in text
