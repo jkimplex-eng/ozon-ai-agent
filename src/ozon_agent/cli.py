@@ -3414,6 +3414,56 @@ def _telegram_send_message(
     return True
 
 
+def _telegram_edit_message(
+    opener: Any,
+    base_url: str,
+    chat_id: Any,
+    message_id: Any,
+    text: str,
+    config: TelegramRuntimeConfig,
+    reply_markup: str | None = None,
+) -> bool:
+    import urllib.parse
+
+    payload = {"chat_id": chat_id, "message_id": message_id, "text": text}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    data = urllib.parse.urlencode(payload).encode()
+    try:
+        _telegram_api_json(
+            opener,
+            f"{base_url}/editMessageText",
+            data=data,
+            timeout=config.request_timeout,
+            attempts=config.retry_attempts,
+            backoff_seconds=config.retry_backoff_seconds,
+            action="editMessageText",
+        )
+    except Exception as exc:
+        console.print(
+            f"[yellow]Telegram editMessageText failed after retries: {escape(type(exc).__name__)}[/]"
+        )
+        return False
+    console.print("[green]Telegram editMessageText success[/]")
+    return True
+
+
+def _telegram_reply_markup_json(reply_markup: Any) -> str | None:
+    if reply_markup is None:
+        return None
+
+    import json as json_mod
+
+    inline_keyboard = [
+        [
+            {"text": button.text, "callback_data": button.callback_data}
+            for button in row
+        ]
+        for row in reply_markup.inline_keyboard
+    ]
+    return json_mod.dumps({"inline_keyboard": inline_keyboard})
+
+
 @telegram.command("run")
 @click.option("--dry-run", is_flag=True, help="Validate configuration without polling")
 def telegram_run(dry_run: bool) -> None:
@@ -3477,34 +3527,49 @@ def telegram_run(dry_run: bool) -> None:
                 if callback_query:
                     query_id = callback_query.get("id")
                     data = callback_query.get("data", "")
-                    chat_id = callback_query.get("message", {}).get("chat", {}).get("id")
-                    user = str((callback_query.get("from") or {}).get("username") or "telegram")
+                    message = callback_query.get("message") or {}
+                    chat_id = message.get("chat", {}).get("id")
+                    message_id = message.get("message_id")
                     if data and chat_id:
                         console.print(f"[cyan]Callback: {escape(data)}[/]")
                         result_text, reply_markup = route_callback_payload(data)
                         if result_text:
-                            reply_markup_json = None
-                            if reply_markup is not None:
-                                import json as json_mod
-                                inline_keyboard = [
-                                    [
-                                        {"text": button.text, "callback_data": button.callback_data}
-                                        for button in row
-                                    ]
-                                    for row in reply_markup.inline_keyboard
-                                ]
-                                reply_markup_json = json_mod.dumps({"inline_keyboard": inline_keyboard})
-                            _telegram_send_message(opener, base_url, chat_id, result_text, config, reply_markup_json)
-                        # Answer the callback query to dismiss loading spinner
-                        _telegram_api_json(
-                            opener,
-                            f"{base_url}/answerCallbackQuery",
-                            data=urllib.parse.urlencode({"callback_query_id": query_id}).encode(),
-                            timeout=10,
-                            attempts=1,
-                            backoff_seconds=0,
-                            action="answerCallbackQuery",
-                        )
+                            reply_markup_json = _telegram_reply_markup_json(reply_markup)
+                            delivered = False
+                            if message_id is not None:
+                                delivered = _telegram_edit_message(
+                                    opener,
+                                    base_url,
+                                    chat_id,
+                                    message_id,
+                                    result_text,
+                                    config,
+                                    reply_markup_json,
+                                )
+                            if not delivered:
+                                _telegram_send_message(
+                                    opener,
+                                    base_url,
+                                    chat_id,
+                                    result_text,
+                                    config,
+                                    reply_markup_json,
+                                )
+                        if query_id:
+                            try:
+                                _telegram_api_json(
+                                    opener,
+                                    f"{base_url}/answerCallbackQuery",
+                                    data=urllib.parse.urlencode({"callback_query_id": query_id}).encode(),
+                                    timeout=10,
+                                    attempts=1,
+                                    backoff_seconds=0,
+                                    action="answerCallbackQuery",
+                                )
+                            except Exception as exc:
+                                console.print(
+                                    f"[yellow]Telegram answerCallbackQuery failed: {escape(type(exc).__name__)}[/]"
+                                )
                     continue
 
                 # Handle regular messages (text commands)
