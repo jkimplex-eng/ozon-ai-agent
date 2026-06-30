@@ -151,7 +151,7 @@ def create_app(token: str, proxy_url: str | None = None) -> Any:
     from ozon_agent.telegram.callbacks import (  # noqa: F401 — side-effect imports for @register
         main_menu_cb, today_cb, business_cb, logistics_cb, ads_cb,
         finance_cb, risks_cb, tasks_cb, experiments_cb, system_cb,
-        store_cb, quick_cb, rec_cb, owner_cb,
+        store_cb, quick_cb, rec_cb, owner_cb, supply_cb,
     )
     from ozon_agent.telegram.keyboards.main_menu import main_menu_keyboard
 
@@ -210,4 +210,5 @@ def create_app(token: str, proxy_url: str | None = None) -> Any:
     app.add_handler(command_handler("experiments", generic_handler))
     app.add_handler(command_handler("supply", generic_handler))
     return app
+
 

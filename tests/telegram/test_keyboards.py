@@ -78,7 +78,7 @@ def test_main_menu_callback_data():
     assert "tasks.show" in all_data
     assert "experiments.show" in all_data
     assert "system.show" in all_data
-    assert "store.show" in all_data
+    assert "supply.show" in all_data
 
 
 def test_rec_keyboard():
@@ -103,3 +103,4 @@ def test_owner_keyboard():
         for row in kb.inline_keyboard
         for btn in row
     ]
+

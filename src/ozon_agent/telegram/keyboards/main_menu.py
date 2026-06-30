@@ -12,11 +12,11 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
          _btn("📈 Бизнес", "business.show")],
         [_btn("📦 Логистика", "logistics.show"),
          _btn("📢 Реклама", "ads.show")],
-        [_btn("💰 Финансы", "finance.show"),
-         _btn("⚠️ Риски", "risks.show")],
-        [_btn("✅ Задачи", "tasks.show"),
-         _btn("📚 Эксперименты", "experiments.show")],
-        [_btn("⚙️ Система", "system.show"),
-         _btn("🏪 Магазин", "store.show")],
+        [_btn("🚚 Поставки", "supply.show"),
+         _btn("💰 Финансы", "finance.show")],
+        [_btn("⚠️ Риски", "risks.show"),
+         _btn("✅ Задачи", "tasks.show")],
+        [_btn("📚 Эксперименты", "experiments.show"),
+         _btn("⚙️ Система", "system.show")],
     ]
     return InlineKeyboardMarkup(rows)

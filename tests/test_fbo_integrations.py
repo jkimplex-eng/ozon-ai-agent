@@ -3,6 +3,8 @@ from unittest.mock import MagicMock, patch
 
 from ozon_agent.sheets.exporters.fbo_demand import EXPORT_COLS, _empty_df, export_fbo_demand
 from ozon_agent.sheets.sync import TAB_EXPORTERS
+from ozon_agent.telegram.callbacks import supply_cb  # noqa: F401
+from ozon_agent.telegram.callbacks.router import route_callback_data
 from ozon_agent.telegram.bot import handle_message
 from ozon_agent.telegram.supply_handlers import _handle_supply
 
@@ -55,3 +57,27 @@ def test_supply_latest_create_draft_uses_latest_owner_approved() -> None:
 
     assert response == "draft ok"
     create_draft.assert_called_once_with("p-2")
+
+
+def test_supply_callback_show_uses_latest_proposal() -> None:
+    proposal = MagicMock()
+    proposal.proposal_id = "p-3"
+    proposal.draft_id = None
+    with patch("ozon_agent.telegram.callbacks.supply_cb._latest_proposal", return_value=proposal):
+        with patch("ozon_agent.telegram.callbacks.supply_cb._render_proposal", return_value="proposal card"):
+            response = route_callback_data("supply.show")
+
+    assert response is not None
+    assert "proposal card" in response
+
+
+def test_supply_callback_approve_routes_to_button_user() -> None:
+    proposal = MagicMock()
+    proposal.proposal_id = "p-4"
+    proposal.draft_id = None
+    with patch("ozon_agent.telegram.callbacks.supply_cb._supply_approve", return_value="approved from button") as approve:
+        with patch("ozon_agent.telegram.callbacks.supply_cb._latest_proposal", return_value=proposal):
+            response = route_callback_data("supply.approve|p-4")
+
+    assert response == "approved from button"
+    approve.assert_called_once_with("p-4", "telegram_button")
