@@ -39,18 +39,18 @@ def _supply_warehouses() -> str:
         client = create_client()
         supply_client = SupplyAPIClient(client)
         warehouses = supply_client.list_fbo_warehouses()
-        
+
         if not warehouses:
             return "No warehouses available."
-        
+
         lines = [f"Warehouses ({len(warehouses)}):\n"]
         for wh in warehouses[:10]:
             status = "ACTIVE" if wh.is_active else "INACTIVE"
             lines.append(f"  {status} {wh.name} (ID: {wh.warehouse_id})")
-        
+
         if len(warehouses) > 10:
             lines.append(f"  ... and {len(warehouses) - 10} more")
-        
+
         return "\n".join(lines)
     except Exception as e:
         return f"Error: {e}"
@@ -61,17 +61,17 @@ def _supply_clusters() -> str:
         client = create_client()
         supply_client = SupplyAPIClient(client)
         clusters = supply_client.list_clusters()
-        
+
         if not clusters:
             return "No clusters available."
-        
+
         lines = [f"Clusters ({len(clusters)}):\n"]
         for cl in clusters[:10]:
             lines.append(f"  {cl.name} (ID: {cl.cluster_id}, warehouses: {cl.warehouses_count})")
-        
+
         if len(clusters) > 10:
             lines.append(f"  ... and {len(clusters) - 10} more")
-        
+
         return "\n".join(lines)
     except Exception as e:
         return f"Error: {e}"
@@ -82,14 +82,14 @@ def _supply_orders() -> str:
         client = create_client()
         supply_client = SupplyAPIClient(client)
         orders = supply_client.list_supply_orders()
-        
+
         if not orders:
             return "No supply orders found."
-        
+
         lines = [f"Supply Orders ({len(orders)}):\n"]
         for order in orders[:10]:
             lines.append(f"  {order.supply_id} - {order.status}")
-        
+
         return "\n".join(lines)
     except Exception as e:
         return f"Error: {e}"
@@ -100,10 +100,10 @@ def _supply_plan() -> str:
         client = create_client()
         engine = SupplyPlanningEngine(client)
         plans = engine.generate_plans(max_plans=5)
-        
+
         if not plans:
             return "No plans to generate (insufficient data or no demand)."
-        
+
         lines = [f"Supply Plans ({len(plans)}):\n"]
         for i, plan in enumerate(plans[:5], 1):
             lines.append(f"{i}. SKU: {plan['sku']}")
@@ -112,7 +112,7 @@ def _supply_plan() -> str:
             lines.append(f"   Warehouse: {plan['target_warehouse_name']}")
             lines.append(f"   Reason: {plan['reason']}")
             lines.append(f"   Confidence: {plan['confidence']:.0%}")
-        
+
         return "\n".join(lines)
     except Exception as e:
         return f"Error: {e}"
@@ -142,7 +142,7 @@ def _supply_fbo() -> str:
             lines.append(f"Confidence: {plan.confidence:.0%}\n")
 
         lines.append("Google Sheets tab: FBO Demand")
-        lines.append("Slot booking requires approval and --execute.")
+        lines.append("Draft and slot booking are available after approval.")
         return "\n".join(lines)
     except Exception as e:
         return f"Error: {e}"
@@ -210,25 +210,27 @@ def _supply_fbo_propose() -> str:
         return "\n".join(lines)
     except Exception as e:
         return f"Error: {e}"
+
+
 def _supply_propose() -> str:
     try:
         client = create_client()
         engine = SupplyPlanningEngine(client)
         manager = ProposalManager(client)
-        
+
         plans = engine.generate_plans(max_plans=5)
         proposals = manager.create_proposals_from_plans(plans)
-        
+
         if not proposals:
             return "No proposals to create."
-        
+
         lines = [f"Proposals created: {len(proposals)}\n"]
         for p in proposals[:5]:
             lines.append(f"  {p.proposal_id}")
             lines.append(f"  SKU: {p.sku}, Quantity: {p.quantity}")
             lines.append(f"  Warehouse: {p.target_warehouse_name}")
             lines.append(f"  Status: {p.status.value}")
-        
+
         return "\n".join(lines)
     except Exception as e:
         return f"Error: {e}"
@@ -255,12 +257,12 @@ def _supply_reject(proposal_id: str, reason: str, user: str) -> str:
 
 
 def _supply_create_draft(proposal_id: str) -> str:
-    return (
-        f"DRY-RUN MODE\n\n"
-        f"To create draft, run:\n"
-        f"python -m ozon_agent.cli supply create-draft {proposal_id} --execute\n\n"
-        f"This action requires explicit owner approval."
-    )
+    try:
+        client = create_client()
+        manager = ProposalManager(client)
+        return manager.create_draft(proposal_id)
+    except Exception as e:
+        return f"Error: {e}"
 
 
 def _supply_timeslots(draft_id: str) -> str:
@@ -291,20 +293,20 @@ def _supply_timeslots(draft_id: str) -> str:
 
 
 def _supply_select_timeslot(proposal_id: str, timeslot_id: str) -> str:
-    return (
-        f"DRY-RUN MODE\n\n"
-        f"To select timeslot, run:\n"
-        f"python -m ozon_agent.cli supply select-timeslot {proposal_id} {timeslot_id} --execute\n\n"
-        f"This action requires explicit owner approval."
-    )
+    try:
+        client = create_client()
+        manager = ProposalManager(client)
+        return manager.create_supply(proposal_id, timeslot_id)
+    except Exception as e:
+        return f"Error: {e}"
 
 
 def _handle_supply(parts: list[str]) -> str:
     if len(parts) == 1 or parts[1] == "help":
         return _supply_help()
-    
+
     cmd = parts[1]
-    
+
     if cmd == "warehouses":
         return _supply_warehouses()
     elif cmd == "clusters":
@@ -333,8 +335,3 @@ def _handle_supply(parts: list[str]) -> str:
         return _supply_select_timeslot(parts[2], parts[3])
     else:
         return _supply_help()
-
-
-
-
-
