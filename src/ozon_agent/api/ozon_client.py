@@ -29,7 +29,14 @@ class OzonClient:
 
     def _post(self, path: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
         response = self._client.post(path, json=data or {})
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            body = response.text.strip()
+            message = f"{exc}"
+            if body:
+                message = f"{message} | response={body}"
+            raise RuntimeError(message) from exc
         return response.json()  # type: ignore[no-any-return]
 
     def get_products(self, limit: int = 1000, page: int = 1) -> dict[str, Any]:
@@ -133,3 +140,4 @@ class OzonClient:
 
 def create_client() -> OzonClient:
     return OzonClient()
+
