@@ -23,6 +23,8 @@ def _supply_help() -> str:
         "/supply orders - list orders\n"
         "/supply plan - generate plans\n"
         "/supply fbo - FBO demand 30/60/90 by cluster\n"
+        "/supply fbo-propose - create FBO proposals\n"
+        "/supply proposals - list proposals\n"
         "/supply propose - create proposals\n"
         "/supply approve ID - approve\n"
         "/supply reject ID reason - reject\n"
@@ -304,6 +306,10 @@ def _handle_supply(parts: list[str]) -> str:
         return _supply_plan()
     elif cmd == "fbo":
         return _supply_fbo()
+    elif cmd == "fbo-propose":
+        return _supply_fbo_propose()
+    elif cmd == "proposals":
+        return _supply_proposals()
     elif cmd == "propose":
         return _supply_propose()
     elif cmd == "approve" and len(parts) >= 3:

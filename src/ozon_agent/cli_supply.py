@@ -218,6 +218,48 @@ def fbo_plan(sku: str | None, max_rows: int, sync_sheets: bool) -> None:
         click.echo(f"Error: {e}", err=True)
         raise click.Abort()
 
+@supply.command("fbo-propose")
+@click.option("--sku", type=str, help="Create proposal for specific SKU")
+@click.option("--max-proposals", default=5, help="Maximum FBO proposals to create")
+def fbo_propose(sku: str | None, max_proposals: int) -> None:
+    """Create supply proposals from FBO demand rows."""
+    client = create_client()
+    engine = FboPlanningEngine(client)
+    manager = ProposalManager(client)
+
+    try:
+        click.echo("\nFBO -> Supply Proposals")
+        click.echo("=" * 80)
+
+        fbo_rows = engine.generate_cluster_demand(
+            skus=[sku] if sku else None,
+            max_rows=max_proposals * 5,
+        )
+        plans = [p for p in (_fbo_plan_to_supply_plan(row) for row in fbo_rows) if p][:max_proposals]
+
+        if not plans:
+            click.echo("\nNo FBO proposals to create")
+            return
+
+        proposals = manager.create_proposals_from_plans(plans)
+        if not proposals:
+            click.echo("\nNo new FBO proposals created (duplicates or no demand)")
+            return
+
+        for proposal in proposals:
+            click.echo(f"\nProposal ID: {proposal.proposal_id}")
+            click.echo(f"   SKU: {proposal.sku}")
+            click.echo(f"   Quantity: {proposal.quantity}")
+            click.echo(f"   Warehouse: {proposal.target_warehouse_name}")
+            click.echo(f"   Status: {proposal.status.value}")
+
+        click.echo(f"\nCreated {len(proposals)} FBO proposals")
+        click.echo("Next step: supply approve <proposal_id> --approved-by <name>")
+
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        raise click.Abort()
+
 @supply.command()
 @click.option("--max-proposals", default=5, help="Maximum proposals to create")
 def propose(max_proposals: int) -> None:
