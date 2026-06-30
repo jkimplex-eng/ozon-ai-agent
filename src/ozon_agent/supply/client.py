@@ -114,27 +114,48 @@ class SupplyAPIClient:
         limit: int = 100,
         offset: int = 0,
     ) -> list[SupplyOrder]:
+        states = [
+            status,
+        ] if status else [
+            "DATA_FILLING",
+            "READY_TO_SUPPLY",
+            "ACCEPTED_AT_SUPPLY_WAREHOUSE",
+            "IN_TRANSIT",
+            "ACCEPTANCE_AT_STORAGE_WAREHOUSE",
+            "REPORTS_CONFIRMATION_AWAITING",
+            "REPORT_REJECTED",
+            "COMPLETED",
+            "REJECTED_AT_SUPPLY_WAREHOUSE",
+            "CANCELLED",
+            "OVERDUE",
+        ]
         payload = {
-            "filter": {"states": ["DATA_FILLING", "READY_TO_SUPPLY", "IN_TRANSIT", "COMPLETED"]},
+            "filter": {"states": states},
             "limit": limit,
-            "offset": offset,
             "sort_by": "ORDER_CREATION",
-            "sort_dir": "DESCENDING",
+            "sort_dir": "DESC",
         }
-        if status:
-            payload["filter"]["states"] = [status]
+        if offset:
+            payload["last_id"] = str(offset)
 
         response = self._client._post("/v3/supply-order/list", payload)
+        order_ids = response.get("order_ids") or response.get("result", {}).get("order_ids") or []
+        if not order_ids:
+            return []
 
+        details = self._client._post("/v3/supply-order/get", {"order_ids": order_ids})
         orders = []
-        for order_data in response.get("result", {}).get("orders", []):
+        for order_data in details.get("orders", []):
+            supplies = order_data.get("supplies") or []
+            first_supply = supplies[0] if supplies else {}
+            storage_warehouse = first_supply.get("storage_warehouse") or {}
             orders.append(
                 SupplyOrder(
-                    supply_id=str(order_data.get("supply_id") or order_data.get("order_id") or ""),
-                    status=order_data.get("status", "unknown"),
-                    warehouse_id=order_data.get("warehouse_id"),
-                    items_count=order_data.get("items_count", 0),
-                    created_at=order_data.get("created_at"),
+                    supply_id=str(order_data.get("order_id") or ""),
+                    status=str(order_data.get("state") or "unknown"),
+                    warehouse_id=storage_warehouse.get("warehouse_id"),
+                    items_count=len(supplies),
+                    created_at=order_data.get("created_date"),
                     data_source=DataSource.REAL_DATA,
                 )
             )
@@ -296,3 +317,4 @@ def _parse_timeslot_id(timeslot_id: str) -> tuple[str, str]:
     if len(parts) < 2:
         raise ValueError(f"Invalid timeslot_id: {timeslot_id}")
     return parts[0], parts[1]
+

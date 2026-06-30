@@ -160,11 +160,16 @@ class ProposalManager:
             if not draft_id:
                 raise RuntimeError(f"No draft_id in response: {draft_response}")
 
-            self._supply_client.create_supply_from_draft(
+            self._wait_for_draft_ready(draft_id)
+            create_response = self._supply_client.create_supply_from_draft(
                 draft_id=draft_id,
                 cluster_id=cluster_id,
                 warehouse_id=int(proposal.target_warehouse_id),
             )
+            error_reasons = create_response.get("error_reasons") or []
+            if error_reasons:
+                raise RuntimeError(f"Supply creation rejected: {error_reasons}")
+
             supply_id = self._wait_for_supply_order(draft_id)
 
             update_proposal_status(
@@ -245,6 +250,19 @@ class ProposalManager:
                     f"Could not resolve macrolocal cluster for warehouse {proposal.target_warehouse_id}"
                 )
             return resolved[0]
+
+    def _wait_for_draft_ready(self, draft_id: str, max_wait: int = 60) -> None:
+        start_time = time.time()
+
+        while time.time() - start_time < max_wait:
+            draft_info = self._supply_client.get_draft_info(draft_id)
+            if draft_info.status == "SUCCESS":
+                return
+            if draft_info.status == "FAILED":
+                raise RuntimeError(f"Draft creation failed for draft_id: {draft_id}")
+            time.sleep(2)
+
+        raise RuntimeError(f"Timeout waiting for draft readiness (draft_id: {draft_id})")
 
     def _wait_for_supply_order(self, draft_id: str, max_wait: int = 60) -> str:
         start_time = time.time()
