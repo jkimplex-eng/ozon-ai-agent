@@ -162,6 +162,9 @@ def fbo_plan(sku: str | None, max_rows: int, sync_sheets: bool) -> None:
 
         if not plans:
             click.echo("\nNo FBO demand rows generated")
+            if sync_sheets:
+                rows = sync_tab("FBO Demand")
+                click.echo(f"\nGoogle Sheets updated: FBO Demand ({rows} rows)")
             return
 
         for i, plan_data in enumerate(plans[:max_rows], 1):
@@ -414,4 +417,5 @@ def select_timeslot(proposal_id: str, timeslot_id: str, execute: bool) -> None:
     except Exception as e:
         click.echo(f"❌ Error: {e}", err=True)
         raise click.Abort()
+
 
