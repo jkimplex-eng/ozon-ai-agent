@@ -9,6 +9,7 @@ from ozon_agent.supply.fbo import FboPlanningEngine
 from ozon_agent.supply.planning import SupplyPlanningEngine
 from ozon_agent.supply.proposals import ProposalManager
 from ozon_agent.supply.models import ProposalStatus
+from ozon_agent.supply.repository import list_proposals
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +145,69 @@ def _supply_fbo() -> str:
     except Exception as e:
         return f"Error: {e}"
 
+
+def _supply_proposals() -> str:
+    try:
+        proposals = list_proposals(limit=10)
+        if not proposals:
+            return "No supply proposals found."
+
+        lines = [f"Supply Proposals ({len(proposals)}):\n"]
+        for proposal in proposals[:10]:
+            lines.append(
+                f"{proposal.proposal_id} | {proposal.sku} | {proposal.quantity} | {proposal.status.value}"
+            )
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def _fbo_plan_to_supply_plan(plan: object) -> dict[str, object] | None:
+    quantity = int(getattr(plan, "recommended_30", 0) or 0)
+    if quantity <= 0:
+        return None
+    return {
+        "sku": str(getattr(plan, "sku", "")),
+        "offer_id": str(getattr(plan, "offer_id", "")),
+        "product_name": str(getattr(plan, "product_name", "")),
+        "quantity": quantity,
+        "target_warehouse_id": int(getattr(plan, "warehouse_id", 0) or 0),
+        "target_warehouse_name": str(getattr(plan, "warehouse_name", "")),
+        "target_cluster_id": str(getattr(plan, "cluster_id", "")),
+        "target_cluster_name": str(getattr(plan, "cluster_name", "")),
+        "reason": (
+            f"FBO 30-day demand coverage for {getattr(plan, 'cluster_name', '')}; "
+            f"stock_days={getattr(plan, 'stock_days', None)}"
+        ),
+        "expected_prevented_loss": 0.0,
+        "confidence": float(getattr(plan, "confidence", 0.0) or 0.0),
+        "data_sources": list(getattr(plan, "data_sources", [])),
+    }
+
+
+def _supply_fbo_propose() -> str:
+    try:
+        client = create_client()
+        engine = FboPlanningEngine(client)
+        manager = ProposalManager(client)
+        fbo_rows = engine.generate_cluster_demand(max_rows=25)
+        plans = [p for p in (_fbo_plan_to_supply_plan(row) for row in fbo_rows) if p][:5]
+        if not plans:
+            return "No FBO proposals to create."
+        proposals = manager.create_proposals_from_plans(plans)
+        if not proposals:
+            return "No new FBO proposals created."
+
+        lines = [f"FBO proposals created: {len(proposals)}\n"]
+        for proposal in proposals[:5]:
+            lines.append(f"ID: {proposal.proposal_id}")
+            lines.append(f"SKU: {proposal.sku}, Qty: {proposal.quantity}")
+            lines.append(f"Warehouse: {proposal.target_warehouse_name}")
+            lines.append(f"Status: {proposal.status.value}\n")
+        lines.append("Approve: /supply approve <proposal_id>")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error: {e}"
 def _supply_propose() -> str:
     try:
         client = create_client()
@@ -254,5 +318,6 @@ def _handle_supply(parts: list[str]) -> str:
         return _supply_select_timeslot(parts[2], parts[3])
     else:
         return _supply_help()
+
 
 

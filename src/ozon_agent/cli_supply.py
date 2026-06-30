@@ -19,6 +19,29 @@ def supply() -> None:
     pass
 
 
+def _fbo_plan_to_supply_plan(plan: object) -> dict[str, object] | None:
+    quantity = int(getattr(plan, "recommended_30", 0) or 0)
+    if quantity <= 0:
+        return None
+    return {
+        "sku": str(getattr(plan, "sku", "")),
+        "offer_id": str(getattr(plan, "offer_id", "")),
+        "product_name": str(getattr(plan, "product_name", "")),
+        "quantity": quantity,
+        "target_warehouse_id": int(getattr(plan, "warehouse_id", 0) or 0),
+        "target_warehouse_name": str(getattr(plan, "warehouse_name", "")),
+        "target_cluster_id": str(getattr(plan, "cluster_id", "")),
+        "target_cluster_name": str(getattr(plan, "cluster_name", "")),
+        "reason": (
+            f"FBO 30-day demand coverage for {getattr(plan, 'cluster_name', '')}; "
+            f"stock_days={getattr(plan, 'stock_days', None)}"
+        ),
+        "expected_prevented_loss": 0.0,
+        "confidence": float(getattr(plan, "confidence", 0.0) or 0.0),
+        "data_sources": list(getattr(plan, "data_sources", [])),
+    }
+
+
 @supply.command()
 def warehouses() -> None:
     """List FBO warehouses (READ-ONLY, REAL_DATA)."""
@@ -417,5 +440,6 @@ def select_timeslot(proposal_id: str, timeslot_id: str, execute: bool) -> None:
     except Exception as e:
         click.echo(f"❌ Error: {e}", err=True)
         raise click.Abort()
+
 
 
