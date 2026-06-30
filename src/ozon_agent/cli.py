@@ -3442,6 +3442,7 @@ def telegram_run(dry_run: bool) -> None:
         quick_cb,
         rec_cb,
         risks_cb,
+        supply_cb,
         store_cb,
         system_cb,
         tasks_cb,
@@ -3634,3 +3635,4 @@ def ranking_top_factors_cmd(sku: str, limit: int) -> None:
 main.add_command(supply_group, "supply")
 if __name__ == "__main__":
     main()
+
