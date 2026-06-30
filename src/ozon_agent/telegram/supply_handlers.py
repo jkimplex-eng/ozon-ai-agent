@@ -6,9 +6,9 @@ from typing import Any
 from ozon_agent.api.ozon_client import create_client
 from ozon_agent.supply.client import SupplyAPIClient
 from ozon_agent.supply.fbo import FboPlanningEngine
+from ozon_agent.supply.models import ProposalStatus, SupplyProposal
 from ozon_agent.supply.planning import SupplyPlanningEngine
 from ozon_agent.supply.proposals import ProposalManager
-from ozon_agent.supply.models import ProposalStatus
 from ozon_agent.supply.repository import get_proposal_by_draft_id, list_proposals
 
 logger = logging.getLogger(__name__)
@@ -17,20 +17,24 @@ logger = logging.getLogger(__name__)
 def _supply_help() -> str:
     return (
         "Supply API\n\n"
-        "Commands:\n"
-        "/supply warehouses - list warehouses\n"
-        "/supply clusters - list clusters\n"
-        "/supply orders - list orders\n"
-        "/supply plan - generate plans\n"
-        "/supply fbo - FBO demand 30/60/90 by cluster\n"
-        "/supply fbo-propose - create FBO proposals\n"
-        "/supply proposals - list proposals\n"
-        "/supply propose - create proposals\n"
-        "/supply approve ID - approve\n"
-        "/supply reject ID reason - reject\n"
-        "/supply create-draft ID - create draft\n"
-        "/supply timeslots DRAFT_ID - show timeslots\n"
-        "/supply select-timeslot ID SLOT - select timeslot\n"
+        "Основные команды:\n"
+        "/supply fbo - показать рекомендации FBO\n"
+        "/supply fbo-propose - создать предложения\n"
+        "/supply proposals - список предложений\n"
+        "/supply latest - последнее предложение\n"
+        "/supply latest-approve - подтвердить последнее предложение\n"
+        "/supply latest-create-draft - создать draft по последнему подтверждённому предложению\n"
+        "/supply latest-timeslots - показать слоты по последнему draft\n"
+        "/supply latest-book-first - забронировать первый доступный слот\n\n"
+        "Технические команды:\n"
+        "/supply warehouses\n"
+        "/supply clusters\n"
+        "/supply orders\n"
+        "/supply approve ID\n"
+        "/supply reject ID reason\n"
+        "/supply create-draft ID\n"
+        "/supply timeslots DRAFT_ID\n"
+        "/supply select-timeslot ID SLOT\n"
     )
 
 
@@ -142,7 +146,7 @@ def _supply_fbo() -> str:
             lines.append(f"Confidence: {plan.confidence:.0%}\n")
 
         lines.append("Google Sheets tab: FBO Demand")
-        lines.append("Draft and slot booking are available after approval.")
+        lines.append("Дальше можно идти коротким путём: latest -> latest-approve -> latest-create-draft")
         return "\n".join(lines)
     except Exception as e:
         return f"Error: {e}"
@@ -206,7 +210,7 @@ def _supply_fbo_propose() -> str:
             lines.append(f"SKU: {proposal.sku}, Qty: {proposal.quantity}")
             lines.append(f"Warehouse: {proposal.target_warehouse_name}")
             lines.append(f"Status: {proposal.status.value}\n")
-        lines.append("Approve: /supply approve <proposal_id>")
+        lines.append("Дальше проще всего: /supply latest-approve")
         return "\n".join(lines)
     except Exception as e:
         return f"Error: {e}"
@@ -234,6 +238,86 @@ def _supply_propose() -> str:
         return "\n".join(lines)
     except Exception as e:
         return f"Error: {e}"
+
+
+def _latest_proposal(*statuses: ProposalStatus) -> SupplyProposal | None:
+    proposals = list_proposals(limit=50)
+    if not statuses:
+        return proposals[0] if proposals else None
+    for proposal in proposals:
+        if proposal.status in statuses:
+            return proposal
+    return None
+
+
+def _render_proposal(proposal: SupplyProposal) -> str:
+    lines = [
+        "Latest Proposal:\n",
+        f"ID: {proposal.proposal_id}",
+        f"SKU: {proposal.sku}",
+        f"Product: {proposal.product_name}",
+        f"Qty: {proposal.quantity}",
+        f"Warehouse: {proposal.target_warehouse_name}",
+        f"Status: {proposal.status.value}",
+        f"Draft ID: {proposal.draft_id or 'N/A'}",
+        f"Supply ID: {proposal.supply_id or 'N/A'}",
+    ]
+    if proposal.timeslot_id:
+        lines.append(f"Timeslot: {proposal.timeslot_id}")
+    return "\n".join(lines)
+
+
+def _supply_latest() -> str:
+    proposal = _latest_proposal()
+    if not proposal:
+        return "No supply proposals found."
+    return _render_proposal(proposal)
+
+
+def _supply_latest_approve(user: str) -> str:
+    proposal = _latest_proposal(ProposalStatus.PROPOSED)
+    if not proposal:
+        return "No proposed supply proposal found."
+    return _supply_approve(proposal.proposal_id, user)
+
+
+def _supply_latest_create_draft() -> str:
+    proposal = _latest_proposal(ProposalStatus.OWNER_APPROVED)
+    if not proposal:
+        return "No approved proposal waiting for draft creation."
+    return _supply_create_draft(proposal.proposal_id)
+
+
+def _supply_latest_timeslots() -> str:
+    proposal = _latest_proposal(ProposalStatus.DRAFT_CREATED, ProposalStatus.SUPPLY_CREATED)
+    if not proposal or not proposal.draft_id:
+        return "No draft found for timeslot lookup."
+    return _supply_timeslots(str(proposal.draft_id))
+
+
+def _supply_latest_book_first() -> str:
+    proposal = _latest_proposal(ProposalStatus.DRAFT_CREATED)
+    if not proposal or not proposal.draft_id:
+        return "No draft ready for slot booking."
+
+    client = create_client()
+    supply_client = SupplyAPIClient(client)
+    try:
+        timeslots = supply_client.get_timeslots(
+            str(proposal.draft_id),
+            cluster_id=proposal.target_cluster_id,
+            warehouse_id=int(proposal.target_warehouse_id),
+            supply_order_id=str(proposal.supply_id) if proposal.supply_id else None,
+        )
+    except Exception as e:
+        return f"Error: {e}"
+
+    if not timeslots:
+        return "No timeslots available for the latest draft."
+
+    first_slot = timeslots[0].timeslot_id
+    result = _supply_select_timeslot(proposal.proposal_id, first_slot)
+    return f"{result}\nBooked slot: {first_slot}"
 
 
 def _supply_approve(proposal_id: str, user: str) -> str:
@@ -323,6 +407,16 @@ def _handle_supply(parts: list[str]) -> str:
         return _supply_proposals()
     elif cmd == "propose":
         return _supply_propose()
+    elif cmd == "latest":
+        return _supply_latest()
+    elif cmd == "latest-approve":
+        return _supply_latest_approve("telegram_user")
+    elif cmd == "latest-create-draft":
+        return _supply_latest_create_draft()
+    elif cmd == "latest-timeslots":
+        return _supply_latest_timeslots()
+    elif cmd == "latest-book-first":
+        return _supply_latest_book_first()
     elif cmd == "approve" and len(parts) >= 3:
         return _supply_approve(parts[2], "telegram_user")
     elif cmd == "reject" and len(parts) >= 4:
