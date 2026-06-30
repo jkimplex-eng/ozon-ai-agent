@@ -5,6 +5,8 @@ import json
 import click
 
 from ozon_agent.api.ozon_client import create_client
+from ozon_agent.sheets.sync import sync_tab
+from ozon_agent.supply.fbo import FboPlanningEngine
 from ozon_agent.supply.client import SupplyAPIClient
 from ozon_agent.supply.models import ProposalStatus
 from ozon_agent.supply.planning import SupplyPlanningEngine
@@ -138,6 +140,57 @@ def plan(sku: int | None, max_plans: int) -> None:
         click.echo(f"❌ Error: {e}", err=True)
         raise click.Abort()
 
+
+@supply.command("fbo")
+@click.option("--sku", type=str, help="Plan for specific SKU")
+@click.option("--max-rows", default=50, help="Maximum rows to show")
+@click.option("--sync-sheets", is_flag=True, help="Write calculation to Google Sheets")
+def fbo_plan(sku: str | None, max_rows: int, sync_sheets: bool) -> None:
+    """Calculate FBO demand by cluster for 30/60/90 days (NO MUTATION)."""
+    client = create_client()
+    engine = FboPlanningEngine(client)
+
+    try:
+        click.echo("\nFBO Demand Plan")
+        click.echo("Mode: DRY-RUN (calculation only, no slot booking)")
+        click.echo("=" * 80)
+
+        plans = engine.generate_cluster_demand(
+            skus=[sku] if sku else None,
+            max_rows=max_rows,
+        )
+
+        if not plans:
+            click.echo("\nNo FBO demand rows generated")
+            return
+
+        for i, plan_data in enumerate(plans[:max_rows], 1):
+            click.echo(f"\n{i}. SKU: {plan_data.sku} - {plan_data.product_name}")
+            click.echo(f"   Cluster: {plan_data.cluster_name}")
+            click.echo(f"   Warehouse: {plan_data.warehouse_name}")
+            click.echo(
+                "   Demand 30/60/90: "
+                f"{plan_data.demand_30}/{plan_data.demand_60}/{plan_data.demand_90}"
+            )
+            click.echo(
+                "   Recommended 30/60/90: "
+                f"{plan_data.recommended_30}/"
+                f"{plan_data.recommended_60}/"
+                f"{plan_data.recommended_90}"
+            )
+            click.echo(f"   Stock: {plan_data.current_stock}")
+            click.echo(f"   Confidence: {plan_data.confidence:.0%}")
+
+        if sync_sheets:
+            rows = sync_tab("FBO Demand")
+            click.echo(f"\nGoogle Sheets updated: FBO Demand ({rows} rows)")
+
+        click.echo(f"\nGenerated {len(plans)} FBO rows (NO MUTATION)")
+        click.echo("Slot booking remains gated by approval + create-draft/select-timeslot --execute")
+
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        raise click.Abort()
 
 @supply.command()
 @click.option("--max-proposals", default=5, help="Maximum proposals to create")
@@ -361,3 +414,4 @@ def select_timeslot(proposal_id: str, timeslot_id: str, execute: bool) -> None:
     except Exception as e:
         click.echo(f"❌ Error: {e}", err=True)
         raise click.Abort()
+

@@ -1,4 +1,4 @@
-"""Create Google Spreadsheet with all 14 tabs and formatting."""
+"""Create Google Spreadsheet with all tabs and formatting."""
 from __future__ import annotations
 
 from typing import Any
@@ -137,6 +137,17 @@ TABS: list[dict[str, Any]] = [
         ],
         "status_col": 8,
     },
+    {
+        "name": "FBO Demand",
+        "columns": [
+            "SKU", "Offer ID", "Product", "Cluster", "Warehouse",
+            "Avg Daily Sales", "Current Stock", "Stock Days",
+            "Demand 30", "Demand 60", "Demand 90",
+            "Recommended 30", "Recommended 60", "Recommended 90",
+            "Confidence", "Data Quality Note",
+        ],
+        "status_col": None,
+    },
 ]
 
 
@@ -191,5 +202,6 @@ def _tab_color(tab_name: str) -> dict[str, float]:
         "Daily Control": {"red": 0.8, "green": 0.5, "blue": 0.1},
         "Daily Input": {"red": 0.7, "green": 0.4, "blue": 0.1},
         "COGS": {"red": 0.6, "green": 0.6, "blue": 0.2},
+        "FBO Demand": {"red": 0.2, "green": 0.5, "blue": 0.5},
     }
     return colors.get(tab_name, {"red": 0.3, "green": 0.3, "blue": 0.3})

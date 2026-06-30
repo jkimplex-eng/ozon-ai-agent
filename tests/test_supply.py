@@ -3,9 +3,11 @@ from unittest.mock import MagicMock, patch
 
 from ozon_agent.supply.client import SupplyAPIClient
 from ozon_agent.supply.data_truth import DataTruthAuditor
+from ozon_agent.supply.fbo import build_fbo_demand_plans
 from ozon_agent.supply.models import (
     ProposalStatus,
     SupplyProposal,
+    Warehouse,
 )
 from ozon_agent.supply.planning import SupplyPlanningEngine
 from ozon_agent.supply.proposals import ProposalManager
@@ -68,6 +70,53 @@ class TestSupplyPlanningEngine:
         with patch.object(engine._supply_client, 'list_fbo_warehouses', return_value=[]):
             plans = engine.generate_plans()
             assert len(plans) == 0
+
+
+class TestFboPlanning:
+    def test_build_fbo_demand_for_30_60_90_by_cluster(self):
+        products = [{
+            "sku": "123",
+            "offer_id": "offer-123",
+            "name": "Test Product",
+            "total_sales": 90,
+            "days_with_sales": 30,
+        }]
+        stocks = [
+            {"sku": "123", "warehouse_name": "Moscow WH", "current_stock": 15},
+            {"sku": "123", "warehouse_name": "Kazan WH", "current_stock": 45},
+        ]
+        warehouses = [
+            Warehouse(1, "Moscow WH", "msk", "Moscow", True),
+            Warehouse(2, "Kazan WH", "kzn", "Kazan", True),
+        ]
+
+        plans = build_fbo_demand_plans(products, stocks, warehouses)
+
+        assert len(plans) == 2
+        by_cluster = {plan.cluster_id: plan for plan in plans}
+        assert by_cluster["msk"].demand_30 == 23
+        assert by_cluster["kzn"].demand_30 == 68
+        assert by_cluster["msk"].recommended_60 == 30
+        assert by_cluster["kzn"].recommended_90 == 158
+        assert "estimated" in by_cluster["msk"].data_quality_note
+
+    def test_build_fbo_demand_uses_equal_share_without_stock(self):
+        products = [{
+            "sku": "123",
+            "offer_id": "offer-123",
+            "name": "Test Product",
+            "total_sales": 60,
+            "days_with_sales": 30,
+        }]
+        warehouses = [
+            Warehouse(1, "Moscow WH", "msk", "Moscow", True),
+            Warehouse(2, "Kazan WH", "kzn", "Kazan", True),
+        ]
+
+        plans = build_fbo_demand_plans(products, [], warehouses)
+
+        assert [plan.demand_30 for plan in plans] == [30, 30]
+        assert [plan.recommended_30 for plan in plans] == [30, 30]
 
 
 class TestProposalManager:
@@ -150,3 +199,13 @@ class TestDataTruthAuditor:
         assert audit["module"] == "supply_planning"
         assert audit["trust_score"] == 80
         assert audit["mock_data_count"] == 0
+
+    def test_audit_fbo_planning_module(self):
+        """Test fbo_planning module audit."""
+        auditor = DataTruthAuditor()
+        audit = auditor.audit_fbo_planning_module()
+
+        assert audit["module"] == "fbo_planning"
+        assert audit["mock_data_count"] == 0
+
+

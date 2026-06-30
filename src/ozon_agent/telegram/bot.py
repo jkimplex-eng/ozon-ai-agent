@@ -41,6 +41,7 @@ from ozon_agent.telegram.handlers_text import (
     _worst_sku,
     format_rec_message,
 )
+from ozon_agent.telegram.supply_handlers import _handle_supply
 
 __all__ = ["handle_message", "create_app", "format_rec_message"]
 
@@ -67,6 +68,8 @@ def _handle_message(text: str, user: str) -> str:
         return _status_dashboard()
     if parts[0] == "/experiments":
         return _handle_experiments(parts, user)
+    if parts[0] == "/supply":
+        return _handle_supply(parts)
     if parts[0] == "/signals":
         return _signals()
     if parts[0] == "/recommendations" and len(parts) == 1:
@@ -205,4 +208,6 @@ def create_app(token: str, proxy_url: str | None = None) -> Any:
     app.add_handler(command_handler("learn", generic_handler))
     app.add_handler(command_handler("cogs", generic_handler))
     app.add_handler(command_handler("experiments", generic_handler))
+    app.add_handler(command_handler("supply", generic_handler))
     return app
+

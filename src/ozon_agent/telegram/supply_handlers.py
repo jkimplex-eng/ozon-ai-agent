@@ -5,6 +5,7 @@ from typing import Any
 
 from ozon_agent.api.ozon_client import create_client
 from ozon_agent.supply.client import SupplyAPIClient
+from ozon_agent.supply.fbo import FboPlanningEngine
 from ozon_agent.supply.planning import SupplyPlanningEngine
 from ozon_agent.supply.proposals import ProposalManager
 from ozon_agent.supply.models import ProposalStatus
@@ -20,6 +21,7 @@ def _supply_help() -> str:
         "/supply clusters - list clusters\n"
         "/supply orders - list orders\n"
         "/supply plan - generate plans\n"
+        "/supply fbo - FBO demand 30/60/90 by cluster\n"
         "/supply propose - create proposals\n"
         "/supply approve ID - approve\n"
         "/supply reject ID reason - reject\n"
@@ -112,6 +114,35 @@ def _supply_plan() -> str:
     except Exception as e:
         return f"Error: {e}"
 
+
+def _supply_fbo() -> str:
+    try:
+        client = create_client()
+        engine = FboPlanningEngine(client)
+        plans = engine.generate_cluster_demand(max_rows=10)
+
+        if not plans:
+            return "No FBO demand rows generated."
+
+        lines = [f"FBO Demand ({len(plans)} rows):\n"]
+        for plan in plans[:5]:
+            lines.append(f"SKU: {plan.sku} - {plan.product_name}")
+            lines.append(f"Cluster: {plan.cluster_name}")
+            lines.append(
+                "Demand 30/60/90: "
+                f"{plan.demand_30}/{plan.demand_60}/{plan.demand_90}"
+            )
+            lines.append(
+                "Recommended 30/60/90: "
+                f"{plan.recommended_30}/{plan.recommended_60}/{plan.recommended_90}"
+            )
+            lines.append(f"Confidence: {plan.confidence:.0%}\n")
+
+        lines.append("Google Sheets tab: FBO Demand")
+        lines.append("Slot booking requires approval and --execute.")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error: {e}"
 
 def _supply_propose() -> str:
     try:
@@ -207,6 +238,8 @@ def _handle_supply(parts: list[str]) -> str:
         return _supply_orders()
     elif cmd == "plan":
         return _supply_plan()
+    elif cmd == "fbo":
+        return _supply_fbo()
     elif cmd == "propose":
         return _supply_propose()
     elif cmd == "approve" and len(parts) >= 3:
@@ -221,3 +254,5 @@ def _handle_supply(parts: list[str]) -> str:
         return _supply_select_timeslot(parts[2], parts[3])
     else:
         return _supply_help()
+
+

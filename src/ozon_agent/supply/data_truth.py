@@ -40,17 +40,40 @@ class DataTruthAuditor:
             "mock_data_count": 0,
         }
 
+    def audit_fbo_planning_module(self) -> dict[str, Any]:
+        """Audit data truth for FBO cluster demand planning."""
+        return {
+            "module": "fbo_planning",
+            "classifications": {
+                "sku_sales_velocity": DataSource.DERIVED_DATA.value,
+                "cluster_demand_30_60_90": DataSource.ESTIMATED_DATA.value,
+                "warehouse_stock": DataSource.DERIVED_DATA.value,
+                "slot_booking": DataSource.REAL_DATA.value,
+                "google_sheets_export": DataSource.DERIVED_DATA.value,
+                "telegram_view": DataSource.DERIVED_DATA.value,
+            },
+            "trust_score": 78,
+            "mock_data_count": 0,
+        }
+
     def get_full_report(self) -> dict[str, Any]:
         """Get full data truth report."""
         supply_audit = self.audit_supply_module()
         planning_audit = self.audit_supply_planning_module()
+        fbo_audit = self.audit_fbo_planning_module()
 
         return {
-            "modules": [supply_audit, planning_audit],
+            "modules": [supply_audit, planning_audit, fbo_audit],
             "summary": {
-                "total_modules": 2,
+                "total_modules": 3,
                 "total_mock_data": 0,
-                "avg_trust_score": (supply_audit["trust_score"] + planning_audit["trust_score"])
-                / 2,
+                "avg_trust_score": (
+                    supply_audit["trust_score"]
+                    + planning_audit["trust_score"]
+                    + fbo_audit["trust_score"]
+                )
+                / 3,
             },
         }
+
+

@@ -26,6 +26,7 @@ from ozon_agent.sheets.exporters.daily_input import export_daily_input
 from ozon_agent.sheets.exporters.daily_report import export_daily_report
 from ozon_agent.sheets.exporters.daily_summary import export_daily_summary
 from ozon_agent.sheets.exporters.experiments import export_experiments
+from ozon_agent.sheets.exporters.fbo_demand import export_fbo_demand
 from ozon_agent.sheets.exporters.ingestion_status import export_ingestion_status
 from ozon_agent.sheets.exporters.market_insights import export_market_insights
 from ozon_agent.sheets.exporters.memory import export_memory
@@ -52,6 +53,7 @@ TAB_EXPORTERS: dict[str, Any] = {
     "Daily Control": export_daily_control,
     "Daily Input": export_daily_input,
     "COGS": export_cogs,
+    "FBO Demand": export_fbo_demand,
 }
 
 _SYNC_STATUS_FILE = Path("data") / "sheets" / "sync_status.json"
@@ -249,3 +251,4 @@ def sync_tab(
 def get_sync_status() -> dict[str, str]:
     """Return last sync time per tab from disk."""
     return _load_sync_status()
+
