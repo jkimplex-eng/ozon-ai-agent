@@ -169,7 +169,7 @@ def _fbo_plan_to_supply_plan(plan: object) -> dict[str, object] | None:
     if quantity <= 0:
         return None
     return {
-        "sku": str(getattr(plan, "sku", "")),
+        "sku": int(str(getattr(plan, "sku", 0) or 0)),
         "offer_id": str(getattr(plan, "offer_id", "")),
         "product_name": str(getattr(plan, "product_name", "")),
         "quantity": quantity,
@@ -324,6 +324,7 @@ def _handle_supply(parts: list[str]) -> str:
         return _supply_select_timeslot(parts[2], parts[3])
     else:
         return _supply_help()
+
 
 
 

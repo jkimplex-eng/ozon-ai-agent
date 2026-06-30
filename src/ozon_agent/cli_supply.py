@@ -24,7 +24,7 @@ def _fbo_plan_to_supply_plan(plan: object) -> dict[str, object] | None:
     if quantity <= 0:
         return None
     return {
-        "sku": str(getattr(plan, "sku", "")),
+        "sku": int(str(getattr(plan, "sku", 0) or 0)),
         "offer_id": str(getattr(plan, "offer_id", "")),
         "product_name": str(getattr(plan, "product_name", "")),
         "quantity": quantity,
@@ -482,6 +482,7 @@ def select_timeslot(proposal_id: str, timeslot_id: str, execute: bool) -> None:
     except Exception as e:
         click.echo(f"❌ Error: {e}", err=True)
         raise click.Abort()
+
 
 
 
