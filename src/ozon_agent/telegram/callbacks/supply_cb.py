@@ -52,6 +52,8 @@ async def _show_supply(query: Any) -> None:
 
     text = (
         "🚚 Поставки FBO\n\n"
+        f"{_supply_proposals()}\n\n"
+        "Текущая карточка для действий:\n\n"
         f"{_render_proposal(proposal)}\n\n"
         "Таблица: Google Sheets -> FBO Demand"
     )
@@ -101,3 +103,4 @@ async def _book_first(query: Any, proposal_id: str) -> None:
     timeslot_id = slot_lines[0].split(":", 1)[0].strip()
     result = _supply_select_timeslot(proposal.proposal_id, timeslot_id)
     await query.edit_message_text(result, reply_markup=supply_keyboard(proposal.proposal_id))
+

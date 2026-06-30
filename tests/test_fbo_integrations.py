@@ -105,3 +105,27 @@ def test_latest_proposal_prefers_actionable_over_failed() -> None:
         proposal = _latest_proposal()
 
     assert proposal is proposed
+
+
+def test_supply_proposals_groups_by_cluster_and_offer() -> None:
+    p1 = MagicMock()
+    p1.status = ProposalStatus.PROPOSED
+    p1.target_cluster_name = "Москва"
+    p1.offer_id = "SJ11"
+    p1.sku = 111
+    p1.quantity = 70
+
+    p2 = MagicMock()
+    p2.status = ProposalStatus.PROPOSED
+    p2.target_cluster_name = "Москва"
+    p2.offer_id = "SJ28"
+    p2.sku = 222
+    p2.quantity = 30
+
+    with patch("ozon_agent.telegram.supply_handlers.list_proposals", return_value=[p1, p2]):
+        from ozon_agent.telegram.supply_handlers import _supply_proposals
+        text = _supply_proposals()
+
+    assert "Москва" in text
+    assert "SJ11 - 70 шт" in text
+    assert "SJ28 - 30 шт" in text

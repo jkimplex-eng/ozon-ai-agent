@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from typing import Any
 
 from ozon_agent.api.ozon_client import create_client
@@ -12,6 +13,13 @@ from ozon_agent.supply.proposals import ProposalManager
 from ozon_agent.supply.repository import get_proposal_by_draft_id, list_proposals
 
 logger = logging.getLogger(__name__)
+
+_ACTIONABLE_STATUSES = (
+    ProposalStatus.PROPOSED,
+    ProposalStatus.OWNER_APPROVED,
+    ProposalStatus.DRAFT_CREATED,
+    ProposalStatus.SUPPLY_CREATED,
+)
 
 
 def _supply_help() -> str:
@@ -36,6 +44,49 @@ def _supply_help() -> str:
         "/supply timeslots DRAFT_ID\n"
         "/supply select-timeslot ID SLOT\n"
     )
+
+
+def _proposal_label(proposal: SupplyProposal) -> str:
+    return proposal.offer_id or str(proposal.sku)
+
+
+def _render_cluster_lines(items: list[tuple[str, str, int]], title: str) -> str:
+    if not items:
+        return title + "\n\nНет данных."
+
+    grouped: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    for cluster_name, label, qty in items:
+        grouped[cluster_name].append((label, qty))
+
+    lines = [title, ""]
+    for cluster_name in sorted(grouped):
+        lines.append(f"{cluster_name}")
+        for label, qty in sorted(grouped[cluster_name], key=lambda row: (-row[1], row[0]))[:12]:
+            lines.append(f"- {label} - {qty} шт")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+def _proposal_cluster_summary(proposals: list[SupplyProposal], title: str) -> str:
+    items = [
+        (proposal.target_cluster_name, _proposal_label(proposal), int(proposal.quantity))
+        for proposal in proposals
+        if int(proposal.quantity or 0) > 0
+    ]
+    return _render_cluster_lines(items, title)
+
+
+def _fbo_cluster_summary(plans: list[object], title: str) -> str:
+    items = [
+        (
+            str(getattr(plan, "cluster_name", "")),
+            str(getattr(plan, "offer_id", "") or getattr(plan, "sku", "")),
+            int(getattr(plan, "recommended_30", 0) or 0),
+        )
+        for plan in plans
+        if int(getattr(plan, "recommended_30", 0) or 0) > 0
+    ]
+    return _render_cluster_lines(items, title)
 
 
 def _supply_warehouses() -> str:
@@ -126,44 +177,33 @@ def _supply_fbo() -> str:
     try:
         client = create_client()
         engine = FboPlanningEngine(client)
-        plans = engine.generate_cluster_demand(max_rows=10)
+        plans = engine.generate_cluster_demand(max_rows=100)
 
         if not plans:
             return "No FBO demand rows generated."
 
-        lines = [f"FBO Demand ({len(plans)} rows):\n"]
-        for plan in plans[:5]:
-            lines.append(f"SKU: {plan.sku} - {plan.product_name}")
-            lines.append(f"Cluster: {plan.cluster_name}")
-            lines.append(
-                "Demand 30/60/90: "
-                f"{plan.demand_30}/{plan.demand_60}/{plan.demand_90}"
-            )
-            lines.append(
-                "Recommended 30/60/90: "
-                f"{plan.recommended_30}/{plan.recommended_60}/{plan.recommended_90}"
-            )
-            lines.append(f"Confidence: {plan.confidence:.0%}\n")
-
-        lines.append("Google Sheets tab: FBO Demand")
-        lines.append("Дальше можно идти коротким путём: latest -> latest-approve -> latest-create-draft")
-        return "\n".join(lines)
+        summary = _fbo_cluster_summary(plans, "Что нужно подсортировать по кластерам")
+        return (
+            f"{summary}\n\n"
+            "Горизонт: 30 дней\n"
+            "Таблица: Google Sheets -> FBO Demand\n"
+            "Следующий шаг: /supply fbo-propose"
+        )
     except Exception as e:
         return f"Error: {e}"
 
 
 def _supply_proposals() -> str:
     try:
-        proposals = list_proposals(limit=10)
+        proposals = list_proposals(limit=50)
         if not proposals:
             return "No supply proposals found."
 
-        lines = [f"Supply Proposals ({len(proposals)}):\n"]
-        for proposal in proposals[:10]:
-            lines.append(
-                f"{proposal.proposal_id} | {proposal.sku} | {proposal.quantity} | {proposal.status.value}"
-            )
-        return "\n".join(lines)
+        actionable = [proposal for proposal in proposals if proposal.status in _ACTIONABLE_STATUSES]
+        if actionable:
+            return _proposal_cluster_summary(actionable[:30], "Что нужно подсортировать сейчас")
+
+        return _proposal_cluster_summary(proposals[:20], "Последние предложения")
     except Exception as e:
         return f"Error: {e}"
 
@@ -196,22 +236,16 @@ def _supply_fbo_propose() -> str:
         client = create_client()
         engine = FboPlanningEngine(client)
         manager = ProposalManager(client)
-        fbo_rows = engine.generate_cluster_demand(max_rows=25)
-        plans = [p for p in (_fbo_plan_to_supply_plan(row) for row in fbo_rows) if p][:5]
+        fbo_rows = engine.generate_cluster_demand(max_rows=100)
+        plans = [p for p in (_fbo_plan_to_supply_plan(row) for row in fbo_rows) if p][:30]
         if not plans:
             return "No FBO proposals to create."
         proposals = manager.create_proposals_from_plans(plans)
         if not proposals:
             return "No new FBO proposals created."
 
-        lines = [f"FBO proposals created: {len(proposals)}\n"]
-        for proposal in proposals[:5]:
-            lines.append(f"ID: {proposal.proposal_id}")
-            lines.append(f"SKU: {proposal.sku}, Qty: {proposal.quantity}")
-            lines.append(f"Warehouse: {proposal.target_warehouse_name}")
-            lines.append(f"Status: {proposal.status.value}\n")
-        lines.append("Дальше проще всего: /supply latest-approve")
-        return "\n".join(lines)
+        summary = _proposal_cluster_summary(proposals, f"Созданы предложения: {len(proposals)}")
+        return f"{summary}\n\nДальше: нажмите Согласовать, затем Создать поставку"
     except Exception as e:
         return f"Error: {e}"
 
@@ -270,6 +304,7 @@ def _render_proposal(proposal: SupplyProposal) -> str:
         "Latest Proposal:\n",
         f"ID: {proposal.proposal_id}",
         f"SKU: {proposal.sku}",
+        f"Offer: {_proposal_label(proposal)}",
         f"Product: {proposal.product_name}",
         f"Qty: {proposal.quantity}",
         f"Warehouse: {proposal.target_warehouse_name}",
@@ -444,4 +479,3 @@ def _handle_supply(parts: list[str]) -> str:
         return _supply_select_timeslot(parts[2], parts[3])
     else:
         return _supply_help()
-
