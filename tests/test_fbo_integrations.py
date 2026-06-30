@@ -3,10 +3,11 @@ from unittest.mock import MagicMock, patch
 
 from ozon_agent.sheets.exporters.fbo_demand import EXPORT_COLS, _empty_df, export_fbo_demand
 from ozon_agent.sheets.sync import TAB_EXPORTERS
+from ozon_agent.supply.models import ProposalStatus
 from ozon_agent.telegram.callbacks import supply_cb  # noqa: F401
 from ozon_agent.telegram.callbacks.router import route_callback_data, route_callback_payload
 from ozon_agent.telegram.bot import handle_message
-from ozon_agent.telegram.supply_handlers import _handle_supply
+from ozon_agent.telegram.supply_handlers import _handle_supply, _latest_proposal
 
 
 def test_fbo_demand_exporter_registered() -> None:
@@ -93,3 +94,14 @@ def test_supply_callback_payload_preserves_keyboard() -> None:
 
     assert text is not None
     assert reply_markup is not None
+
+
+def test_latest_proposal_prefers_actionable_over_failed() -> None:
+    failed = MagicMock()
+    failed.status = ProposalStatus.FAILED
+    proposed = MagicMock()
+    proposed.status = ProposalStatus.PROPOSED
+    with patch("ozon_agent.telegram.supply_handlers.list_proposals", return_value=[failed, proposed]):
+        proposal = _latest_proposal()
+
+    assert proposal is proposed

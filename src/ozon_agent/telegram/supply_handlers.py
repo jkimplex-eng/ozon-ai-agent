@@ -242,12 +242,27 @@ def _supply_propose() -> str:
 
 def _latest_proposal(*statuses: ProposalStatus) -> SupplyProposal | None:
     proposals = list_proposals(limit=50)
-    if not statuses:
-        return proposals[0] if proposals else None
-    for proposal in proposals:
-        if proposal.status in statuses:
-            return proposal
-    return None
+    if not proposals:
+        return None
+
+    if statuses:
+        for proposal in proposals:
+            if proposal.status in statuses:
+                return proposal
+        return None
+
+    preferred = (
+        ProposalStatus.PROPOSED,
+        ProposalStatus.OWNER_APPROVED,
+        ProposalStatus.DRAFT_CREATED,
+        ProposalStatus.SUPPLY_CREATED,
+    )
+    for status in preferred:
+        for proposal in proposals:
+            if proposal.status == status:
+                return proposal
+
+    return proposals[0]
 
 
 def _render_proposal(proposal: SupplyProposal) -> str:
@@ -429,3 +444,4 @@ def _handle_supply(parts: list[str]) -> str:
         return _supply_select_timeslot(parts[2], parts[3])
     else:
         return _supply_help()
+

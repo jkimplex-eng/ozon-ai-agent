@@ -142,7 +142,8 @@ class ProposalManager:
         if not proposal:
             raise ValueError(f"Proposal not found: {proposal_id}")
 
-        if proposal.status != ProposalStatus.OWNER_APPROVED:
+        retry_failed = proposal.status == ProposalStatus.FAILED and proposal.approved_at is not None
+        if proposal.status != ProposalStatus.OWNER_APPROVED and not retry_failed:
             raise ValueError(
                 f"Proposal must be approved first. Current status: {proposal.status.value}"
             )
@@ -313,6 +314,7 @@ class ProposalManager:
             time.sleep(2)
 
         raise RuntimeError(f"Timeout waiting for timeslot reservation (operation_id: {operation_id})")
+
 
 
 

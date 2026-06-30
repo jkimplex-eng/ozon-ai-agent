@@ -1,4 +1,5 @@
 """Tests for Supply module."""
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 from ozon_agent.supply.client import SupplyAPIClient
@@ -251,4 +252,41 @@ class TestDataTruthAuditor:
         )
         assert mock_update.call_args_list[0].kwargs['target_warehouse_id'] == 222
         assert mock_update.call_args_list[0].kwargs['target_warehouse_name'] == 'Actual Ozon Warehouse'
+
+
+    def test_create_draft_allows_retry_for_failed_approved_proposal(self):
+        client = MagicMock()
+        manager = ProposalManager(client)
+
+        proposal = SupplyProposal(
+            proposal_id="retry-id",
+            sku=123,
+            offer_id="test",
+            product_name="Test",
+            quantity=100,
+            target_warehouse_id=111,
+            target_warehouse_name="Planned Warehouse",
+            target_cluster_id="4067",
+            target_cluster_name="Novosibirsk",
+            reason="Test",
+            expected_prevented_loss=100.0,
+            confidence=0.8,
+            data_sources=[],
+            status=ProposalStatus.FAILED,
+            approved_at=datetime.now(),
+        )
+
+        draft_info = MagicMock()
+        draft_info.warehouse_id = 222
+        draft_info.warehouse_name = "Actual Ozon Warehouse"
+
+        with patch('ozon_agent.supply.proposals.get_proposal', return_value=proposal):
+            with patch('ozon_agent.supply.proposals.update_proposal_status'):
+                with patch.object(manager, '_wait_for_draft_ready', return_value=draft_info):
+                    with patch.object(manager, '_wait_for_supply_order', return_value='supply-1'):
+                        with patch.object(manager._supply_client, 'create_draft', return_value={'draft_id': 'draft-1'}):
+                            with patch.object(manager._supply_client, 'create_supply_from_draft', return_value={}):
+                                result = manager.create_draft('retry-id')
+
+        assert 'draft-1' in result
 
