@@ -3387,10 +3387,14 @@ def _telegram_send_message(
     chat_id: Any,
     text: str,
     config: TelegramRuntimeConfig,
+    reply_markup: str | None = None,
 ) -> bool:
     import urllib.parse
 
-    data = urllib.parse.urlencode({"chat_id": chat_id, "text": text}).encode()
+    payload = {"chat_id": chat_id, "text": text}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    data = urllib.parse.urlencode(payload).encode()
     try:
         _telegram_api_json(
             opener,
@@ -3448,7 +3452,7 @@ def telegram_run(dry_run: bool) -> None:
         tasks_cb,
         today_cb,
     )
-    from .telegram.callbacks.router import route_callback_data
+    from .telegram.callbacks.router import route_callback_payload
 
     opener = _build_telegram_opener(config.proxy_url)
     base_url = f"https://api.telegram.org/bot{token}"
@@ -3477,9 +3481,20 @@ def telegram_run(dry_run: bool) -> None:
                     user = str((callback_query.get("from") or {}).get("username") or "telegram")
                     if data and chat_id:
                         console.print(f"[cyan]Callback: {escape(data)}[/]")
-                        result = route_callback_data(data)
-                        if result:
-                            _telegram_send_message(opener, base_url, chat_id, result, config)
+                        result_text, reply_markup = route_callback_payload(data)
+                        if result_text:
+                            reply_markup_json = None
+                            if reply_markup is not None:
+                                import json as json_mod
+                                inline_keyboard = [
+                                    [
+                                        {"text": button.text, "callback_data": button.callback_data}
+                                        for button in row
+                                    ]
+                                    for row in reply_markup.inline_keyboard
+                                ]
+                                reply_markup_json = json_mod.dumps({"inline_keyboard": inline_keyboard})
+                            _telegram_send_message(opener, base_url, chat_id, result_text, config, reply_markup_json)
                         # Answer the callback query to dismiss loading spinner
                         _telegram_api_json(
                             opener,
@@ -3635,4 +3650,7 @@ def ranking_top_factors_cmd(sku: str, limit: int) -> None:
 main.add_command(supply_group, "supply")
 if __name__ == "__main__":
     main()
+
+
+
 

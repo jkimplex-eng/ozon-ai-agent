@@ -66,24 +66,28 @@ class _SyncQuery:
         return self._text
 
     @property
+    def reply_markup(self) -> Any:
+        return self._reply_markup
+
+    @property
     def data(self) -> str:
         return ""
 
 
-def route_callback_data(data: str) -> str | None:
+def route_callback_payload(data: str) -> tuple[str | None, Any | None]:
     """Synchronous callback dispatch for urllib polling.
 
-    Returns the text response for the callback, or None if no response.
+    Returns a tuple of (text, reply_markup) captured from the callback.
     """
     if data == "noop":
-        return None
+        return None, None
 
     namespace, action, params = _parse_callback_data(data)
     handler = _HANDLERS.get(namespace)
 
     if handler is None:
         logger.warning("Unknown callback namespace: %s", namespace)
-        return None
+        return None, None
 
     try:
         mock_query = _SyncQuery()
@@ -95,7 +99,13 @@ def route_callback_data(data: str) -> str | None:
                 loop.run_until_complete(result)
             finally:
                 loop.close()
-        return mock_query.text if mock_query.text else None
+        return (mock_query.text if mock_query.text else None, mock_query.reply_markup)
     except Exception as exc:
         logger.exception("Callback handler error: %s.%s", namespace, action)
-        return f"❌ Ошибка: {exc}"
+        return f"❌ Ошибка: {exc}", None
+
+
+def route_callback_data(data: str) -> str | None:
+    """Backward-compatible text-only callback dispatch."""
+    text, _reply_markup = route_callback_payload(data)
+    return text

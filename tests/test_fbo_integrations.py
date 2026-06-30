@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 from ozon_agent.sheets.exporters.fbo_demand import EXPORT_COLS, _empty_df, export_fbo_demand
 from ozon_agent.sheets.sync import TAB_EXPORTERS
 from ozon_agent.telegram.callbacks import supply_cb  # noqa: F401
-from ozon_agent.telegram.callbacks.router import route_callback_data
+from ozon_agent.telegram.callbacks.router import route_callback_data, route_callback_payload
 from ozon_agent.telegram.bot import handle_message
 from ozon_agent.telegram.supply_handlers import _handle_supply
 
@@ -81,3 +81,15 @@ def test_supply_callback_approve_routes_to_button_user() -> None:
 
     assert response == "approved from button"
     approve.assert_called_once_with("p-4", "telegram_button")
+
+
+def test_supply_callback_payload_preserves_keyboard() -> None:
+    proposal = MagicMock()
+    proposal.proposal_id = "p-5"
+    proposal.draft_id = None
+    with patch("ozon_agent.telegram.callbacks.supply_cb._latest_proposal", return_value=proposal):
+        with patch("ozon_agent.telegram.callbacks.supply_cb._render_proposal", return_value="proposal card"):
+            text, reply_markup = route_callback_payload("supply.show")
+
+    assert text is not None
+    assert reply_markup is not None
