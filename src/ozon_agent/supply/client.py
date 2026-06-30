@@ -5,13 +5,13 @@ from typing import Any
 
 from ozon_agent.api.ozon_client import OzonClient
 from ozon_agent.supply.models import (
+    Cluster,
     DataSource,
     DraftInfo,
     DraftPayload,
     SupplyOrder,
     Timeslot,
     Warehouse,
-    Cluster,
 )
 
 logger = logging.getLogger(__name__)
@@ -24,21 +24,46 @@ class SupplyAPIClient:
         self._client = ozon_client
 
     def list_fbo_warehouses(self) -> list[Warehouse]:
-        cities = ["Москва", "Санкт-Петербург", "Казань", "Екатеринбург", "Новосибирск", "Краснодар"]
-        all_warehouses = []
+        cities = [
+            "Москва",
+            "Санкт-Петербург",
+            "Казань",
+            "Екатеринбург",
+            "Новосибирск",
+            "Краснодар",
+        ]
+        all_warehouses: list[dict[str, Any]] = []
         for city in cities:
             try:
-                city_response = self._client._post("/v1/warehouse/fbo/list", {"search": city, "filter_by_supply_type": ["CREATE_TYPE_DIRECT"]})
-                city_warehouses = city_response.get("search", [])
+                city_response = self._client._post(
+                    "/v1/warehouse/fbo/list",
+                    {
+                        "search": city,
+                        "filter_by_supply_type": ["CREATE_TYPE_DIRECT"],
+                    },
+                )
+                result = city_response.get("result", {})
+                city_warehouses = (
+                    city_response.get("search")
+                    or city_response.get("warehouses")
+                    or result.get("warehouses")
+                    or result.get("search")
+                    or []
+                )
                 all_warehouses.extend(city_warehouses)
             except Exception:
                 continue
-        
+
         warehouses = []
+        seen_ids = set()
         for wh_data in all_warehouses:
+            warehouse_id = wh_data.get("warehouse_id")
+            if warehouse_id in seen_ids:
+                continue
+            seen_ids.add(warehouse_id)
             warehouses.append(
                 Warehouse(
-                    warehouse_id=wh_data["warehouse_id"],
+                    warehouse_id=warehouse_id,
                     name=wh_data.get("name", ""),
                     cluster_id=wh_data.get("cluster_id"),
                     cluster_name=wh_data.get("cluster_name"),
@@ -46,27 +71,38 @@ class SupplyAPIClient:
                     data_source=DataSource.REAL_DATA,
                 )
             )
-        
+
         return warehouses
 
     def list_clusters(self) -> list[Cluster]:
         response = self._client._post("/v1/cluster/list", {"cluster_type": "CLUSTER_TYPE_OZON"})
-        
+        result = response.get("result", {})
+        clusters_data = response.get("clusters") or result.get("clusters") or []
+
         clusters = []
-        for cl_data in response.get("clusters", []):
+        for cl_data in clusters_data:
+            logistic_clusters = cl_data.get("logistic_clusters") or []
+            warehouses_count = cl_data.get("warehouses_count")
+            if warehouses_count is None and logistic_clusters:
+                warehouses_count = len(logistic_clusters[0].get("warehouses", []))
             clusters.append(
                 Cluster(
-                    cluster_id=str(cl_data.get("id", "")),
+                    cluster_id=str(cl_data.get("cluster_id") or cl_data.get("id") or ""),
                     name=cl_data.get("name", ""),
                     cluster_type=cl_data.get("type", "OZON"),
-                    warehouses_count=len(cl_data.get("logistic_clusters", [{}])[0].get("warehouses", [])) if cl_data.get("logistic_clusters") else 0,
+                    warehouses_count=int(warehouses_count or 0),
                     data_source=DataSource.REAL_DATA,
                 )
             )
-        
+
         return clusters
 
-    def list_supply_orders(self, status: str | None = None, limit: int = 100, offset: int = 0) -> list[SupplyOrder]:
+    def list_supply_orders(
+        self,
+        status: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[SupplyOrder]:
         payload = {
             "filter": {"states": ["DATA_FILLING", "READY_TO_SUPPLY", "IN_TRANSIT", "COMPLETED"]},
             "limit": limit,
@@ -76,9 +112,9 @@ class SupplyAPIClient:
         }
         if status:
             payload["filter"]["states"] = [status]
-        
+
         response = self._client._post("/v3/supply-order/list", payload)
-        
+
         orders = []
         for order_data in response.get("result", {}).get("orders", []):
             orders.append(
@@ -91,12 +127,12 @@ class SupplyAPIClient:
                     data_source=DataSource.REAL_DATA,
                 )
             )
-        
+
         return orders
 
     def get_draft_info(self, draft_id: str) -> DraftInfo:
         response = self._client._post("/v1/draft/create/info", {"draft_id": draft_id})
-        
+
         result = response.get("result", {})
         return DraftInfo(
             draft_id=draft_id,
@@ -109,7 +145,7 @@ class SupplyAPIClient:
 
     def get_timeslots(self, draft_id: str) -> list[Timeslot]:
         response = self._client._post("/v1/draft/timeslot/info", {"draft_id": draft_id})
-        
+
         timeslots = []
         for ts_data in response.get("result", {}).get("timeslots", []):
             timeslots.append(
@@ -121,7 +157,7 @@ class SupplyAPIClient:
                     data_source=DataSource.REAL_DATA,
                 )
             )
-        
+
         return timeslots
 
     def create_draft(self, payload: DraftPayload) -> dict[str, Any]:

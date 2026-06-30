@@ -1,4 +1,5 @@
 """Ozon AI Agent CLI."""
+
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -6,16 +7,18 @@ from typing import TYPE_CHECKING, Any
 
 import click
 from dotenv import load_dotenv
-load_dotenv("/root/ozon-ai-agent/.env")
 from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
 from .api.ozon_client import create_client
+from .cli_supply import supply as supply_group
 from .etl.sync import sync_all, sync_finance, sync_orders, sync_products
 
 if TYPE_CHECKING:
     from .decision.models import Recommendation
+
+load_dotenv("/root/ozon-ai-agent/.env")
 
 console = Console()
 
@@ -270,7 +273,9 @@ def diagnostics() -> None:
 @click.option("--target", "-t", default="quantity", help="Target column to forecast")
 @click.option("--periods", "-p", default=7, help="Number of days to forecast")
 @click.option(
-    "--model", "-m", default="prophet",
+    "--model",
+    "-m",
+    default="prophet",
     type=click.Choice(["prophet", "xgboost", "lightgbm"]),
 )
 def forecast(target: str, periods: int, model: str) -> None:
@@ -284,10 +289,12 @@ def forecast(target: str, periods: int, model: str) -> None:
     from .forecast.xgb_forecaster import XGBForecaster
 
     console.print(f"[bold blue]Loading data for {target}...[/]")
-    sales = pd.DataFrame(execute_query(
-        "SELECT date, SUM(quantity) as quantity, "
-        "SUM(revenue) as revenue FROM sales GROUP BY date ORDER BY date"
-    ))
+    sales = pd.DataFrame(
+        execute_query(
+            "SELECT date, SUM(quantity) as quantity, "
+            "SUM(revenue) as revenue FROM sales GROUP BY date ORDER BY date"
+        )
+    )
 
     if sales.empty:
         console.print("[red]No sales data found. Run sync first.[/]")
@@ -317,7 +324,8 @@ def forecast(target: str, periods: int, model: str) -> None:
 
 @main.command()
 @click.option(
-    "--builder", "-b",
+    "--builder",
+    "-b",
     default="manual",
     type=click.Choice(["mimo", "codex", "cursor", "claude", "manual"]),
     help="Builder type that produced the changes",
@@ -536,8 +544,14 @@ def deploy_rollback(target: str, commits: int) -> None:
 @click.option("--calibrated", is_flag=True, default=False, help="Apply historical calibration")
 @click.pass_context
 def recommendations(
-    ctx: click.Context, sku: str | None, top: int, as_json: bool, output: str | None,
-    save_pending: bool, force: bool, calibrated: bool,
+    ctx: click.Context,
+    sku: str | None,
+    top: int,
+    as_json: bool,
+    output: str | None,
+    save_pending: bool,
+    force: bool,
+    calibrated: bool,
 ) -> None:
     """Generate recommendations from current data."""
     if ctx.invoked_subcommand is not None:
@@ -601,13 +615,12 @@ def recommendations(
         outcomes = []
         for s in stored:
             from .approval.repository import list_outcomes
+
             outcomes.extend(list_outcomes(s.id))
         if stored and outcomes:
             samples = build_learning_samples(stored, outcomes)
             calibration_factor = get_calibration_factor(samples)
-            console.print(
-                f"[bold blue]Calibration factor: {calibration_factor:.2f}[/]"
-            )
+            console.print(f"[bold blue]Calibration factor: {calibration_factor:.2f}[/]")
         else:
             console.print("[yellow]No observed outcomes for calibration.[/]")
 
@@ -654,13 +667,17 @@ def recommendations(
 
         for rec in recs:
             conf_color = (
-                "green" if rec.confidence.level.value == "HIGH"
-                else "yellow" if rec.confidence.level.value == "MEDIUM"
+                "green"
+                if rec.confidence.level.value == "HIGH"
+                else "yellow"
+                if rec.confidence.level.value == "MEDIUM"
                 else "red"
             )
             risk_color = (
-                "green" if rec.risk.level.value == "LOW"
-                else "yellow" if rec.risk.level.value == "MEDIUM"
+                "green"
+                if rec.risk.level.value == "LOW"
+                else "yellow"
+                if rec.risk.level.value == "MEDIUM"
                 else "red"
             )
             table.add_row(
@@ -926,7 +943,9 @@ def approvals_outcomes(rec_id: str) -> None:
 
 @main.command()
 @click.option(
-    "--dry-run", is_flag=True, default=False,
+    "--dry-run",
+    is_flag=True,
+    default=False,
     help="Show pending migrations without applying",
 )
 def migrate(dry_run: bool) -> None:
@@ -936,8 +955,7 @@ def migrate(dry_run: bool) -> None:
 
     status = migration_status()
     console.print(
-        f"[bold blue]Migrations: {status['applied']} applied, "
-        f"{status['pending']} pending[/]"
+        f"[bold blue]Migrations: {status['applied']} applied, {status['pending']} pending[/]"
     )
 
     if status["pending"] == 0:
@@ -1012,6 +1030,7 @@ def learning_summary(as_json: bool, output: str | None) -> None:
     outcomes = []
     for s in stored:
         from .approval.repository import list_outcomes
+
         outcomes.extend(list_outcomes(s.id))
 
     samples = build_learning_samples(stored, outcomes)
@@ -1020,9 +1039,7 @@ def learning_summary(as_json: bool, output: str | None) -> None:
     by_sku = calculate_sku_accuracy(samples)
 
     if as_json or output:
-        data = learning_report_to_dict(
-            accuracy, by_action=by_action, by_sku=by_sku
-        )
+        data = learning_report_to_dict(accuracy, by_action=by_action, by_sku=by_sku)
         text = json_mod.dumps(data, ensure_ascii=False, indent=2)
         if output:
             with open(output, "w", encoding="utf-8") as f:
@@ -1031,9 +1048,7 @@ def learning_summary(as_json: bool, output: str | None) -> None:
         else:
             console.print(text)
     else:
-        console.print(format_learning_report(
-            accuracy, by_action=by_action, by_sku=by_sku
-        ))
+        console.print(format_learning_report(accuracy, by_action=by_action, by_sku=by_sku))
 
 
 @learning.command("calibrate")
@@ -1053,6 +1068,7 @@ def learning_calibrate() -> None:
     outcomes = []
     for s in stored:
         from .approval.repository import list_outcomes
+
         outcomes.extend(list_outcomes(s.id))
 
     samples = build_learning_samples(stored, outcomes)
@@ -1076,6 +1092,7 @@ def learning_backtest() -> None:
     outcomes = []
     for s in stored:
         from .approval.repository import list_outcomes
+
         outcomes.extend(list_outcomes(s.id))
 
     bt = backtest_recommendations([], stored, outcomes)
@@ -1098,6 +1115,7 @@ def learning_by_action() -> None:
     outcomes = []
     for s in stored:
         from .approval.repository import list_outcomes
+
         outcomes.extend(list_outcomes(s.id))
 
     samples = build_learning_samples(stored, outcomes)
@@ -1128,6 +1146,7 @@ def learning_by_sku() -> None:
     outcomes = []
     for s in stored:
         from .approval.repository import list_outcomes
+
         outcomes.extend(list_outcomes(s.id))
 
     samples = build_learning_samples(stored, outcomes)
@@ -1330,6 +1349,7 @@ def quality_report(save: bool) -> None:
     daily_data = []
     try:
         from .sheets.file_source import load_sales
+
         daily_data = load_sales() or []
     except Exception:
         pass
@@ -1360,6 +1380,7 @@ def cockpit_build(save: bool) -> None:
     daily_data = []
     try:
         from .sheets.file_source import load_sales
+
         daily_data = load_sales() or []
     except Exception:
         pass
@@ -1447,6 +1468,7 @@ def forecast_cmd(sku_name: str, save: bool) -> None:
     daily_data = []
     try:
         from .sheets.file_source import load_sales
+
         daily_data = load_sales() or []
     except Exception:
         pass
@@ -2269,13 +2291,21 @@ def experiments() -> None:
 @click.option("--risk", default=None, help="Risk level")
 @click.option("--confidence", default=None, help="Confidence level")
 def experiments_create(
-    sku: str, hypothesis: str, action: str, risk: str | None, confidence: str | None,
+    sku: str,
+    hypothesis: str,
+    action: str,
+    risk: str | None,
+    confidence: str | None,
 ) -> None:
     """Create a new experiment."""
     from .experiments.workflow import create_new_experiment
 
     exp = create_new_experiment(
-        sku=sku, hypothesis=hypothesis, action=action, risk=risk, confidence=confidence,
+        sku=sku,
+        hypothesis=hypothesis,
+        action=action,
+        risk=risk,
+        confidence=confidence,
     )
     console.print(f"[green]Created experiment {exp.id[:8]}...[/]")
 
@@ -2628,8 +2658,7 @@ def experiments_create_from_recommendation(rec_id: str) -> None:
 
     if rec.status not in (RecommendationStatus.APPROVED, RecommendationStatus.EXECUTED):
         console.print(
-            f"[red]Recommendation must be APPROVED or EXECUTED, "
-            f"got {rec.status.value}[/]"
+            f"[red]Recommendation must be APPROVED or EXECUTED, got {rec.status.value}[/]"
         )
         return
 
@@ -2648,8 +2677,7 @@ def experiments_create_from_recommendation(rec_id: str) -> None:
         expected_effect=expected_effect,
     )
     console.print(
-        f"[green]Created experiment {exp.id[:8]}... "
-        f"from recommendation {rec.id[:8]}...[/]"
+        f"[green]Created experiment {exp.id[:8]}... from recommendation {rec.id[:8]}...[/]"
     )
 
 
@@ -2692,7 +2720,8 @@ def sheets_setup(title: str) -> None:
 @sheets.command("sync")
 @click.option("--tab", default=None, help="Sync single tab (default: all)")
 @click.option(
-    "--source", default=None,
+    "--source",
+    default=None,
     type=click.Choice(["auto", "db", "files"]),
     help="Data source: auto (detect), db (PostgreSQL), files (file-based only)",
 )
@@ -3374,8 +3403,7 @@ def _telegram_send_message(
         )
     except Exception as exc:
         console.print(
-            "[red]Telegram sendMessage failed after retries: "
-            f"{escape(type(exc).__name__)}[/]"
+            f"[red]Telegram sendMessage failed after retries: {escape(type(exc).__name__)}[/]"
         )
         return False
     console.print("[green]Telegram sendMessage success[/]")
@@ -3403,12 +3431,23 @@ def telegram_run(dry_run: bool) -> None:
         return
 
     # Import callback router and handlers
-    from .telegram.callbacks.router import route_callback_data
     from .telegram.callbacks import (  # noqa: F401 — side-effect imports for @register
-        main_menu_cb, today_cb, business_cb, logistics_cb, ads_cb,
-        finance_cb, risks_cb, tasks_cb, experiments_cb, system_cb,
-        store_cb, quick_cb, rec_cb, owner_cb,
+        ads_cb,
+        business_cb,
+        experiments_cb,
+        finance_cb,
+        logistics_cb,
+        main_menu_cb,
+        owner_cb,
+        quick_cb,
+        rec_cb,
+        risks_cb,
+        store_cb,
+        system_cb,
+        tasks_cb,
+        today_cb,
     )
+    from .telegram.callbacks.router import route_callback_data
 
     opener = _build_telegram_opener(config.proxy_url)
     base_url = f"https://api.telegram.org/bot{token}"
@@ -3445,7 +3484,9 @@ def telegram_run(dry_run: bool) -> None:
                             opener,
                             f"{base_url}/answerCallbackQuery",
                             data=urllib.parse.urlencode({"callback_query_id": query_id}).encode(),
-                            timeout=10, attempts=1, backoff_seconds=0,
+                            timeout=10,
+                            attempts=1,
+                            backoff_seconds=0,
                             action="answerCallbackQuery",
                         )
                     continue
@@ -3462,24 +3503,38 @@ def telegram_run(dry_run: bool) -> None:
                 console.print(f"[cyan]Telegram received command: {escape(command)}[/]")
 
                 if command == "/start":
-                    from .telegram.keyboards.main_menu import main_menu_keyboard
                     import json as json_mod
+
+                    from .telegram.keyboards.main_menu import main_menu_keyboard
+
                     kb = main_menu_keyboard()
-                    reply_markup = json_mod.dumps({"inline_keyboard": [[{"text": b.text, "callback_data": b.callback_data} for b in row] for row in kb.inline_keyboard]})
-                    data = urllib.parse.urlencode({
-                        "chat_id": chat_id,
-                        "text": "🏪 OZON AI — Панель управления\n\nВыберите раздел:",
-                        "reply_markup": reply_markup,
-                    }).encode()
+                    inline_keyboard = [
+                        [
+                            {"text": button.text, "callback_data": button.callback_data}
+                            for button in row
+                        ]
+                        for row in kb.inline_keyboard
+                    ]
+                    reply_markup = json_mod.dumps({"inline_keyboard": inline_keyboard})
+                    data = urllib.parse.urlencode(
+                        {
+                            "chat_id": chat_id,
+                            "text": "🏪 OZON AI — Панель управления\n\nВыберите раздел:",
+                            "reply_markup": reply_markup,
+                        }
+                    ).encode()
                     _telegram_api_json(
-                        opener, f"{base_url}/sendMessage",
-                        data=data, timeout=config.request_timeout,
+                        opener,
+                        f"{base_url}/sendMessage",
+                        data=data,
+                        timeout=config.request_timeout,
                         attempts=config.retry_attempts,
                         backoff_seconds=config.retry_backoff_seconds,
                         action="sendMessage",
                     )
                 else:
                     from .telegram.bot import handle_message
+
                     reply = handle_message(text, user=user)
                     console.print(f"[cyan]Telegram handled command: {escape(command)}[/]")
                     _telegram_send_message(opener, base_url, chat_id, reply, config)
@@ -3487,8 +3542,7 @@ def telegram_run(dry_run: bool) -> None:
             raise
         except Exception as exc:
             console.print(
-                "[yellow]Telegram polling warning after retries: "
-                f"{escape(type(exc).__name__)}[/]"
+                f"[yellow]Telegram polling warning after retries: {escape(type(exc).__name__)}[/]"
             )
             time.sleep(max(config.retry_backoff_seconds, 10))
 
@@ -3528,12 +3582,11 @@ def reconcile_legacy_finance_cmd(legacy_id: str, month: str) -> None:
     console.print(f"Saved: data/reconciliation/legacy_vs_new_{month}.json")
     if not result.pass_threshold:
         failed = ", ".join(
-            row.metric for row in result.rows
+            row.metric
+            for row in result.rows
             if row.metric in COMPARE_METRICS and row.status != "OK"
         )
-        raise click.ClickException(
-            f"Financial reconciliation failed threshold for: {failed}"
-        )
+        raise click.ClickException(f"Financial reconciliation failed threshold for: {failed}")
 
 
 @main.group("ranking")
@@ -3578,11 +3631,6 @@ def ranking_top_factors_cmd(sku: str, limit: int) -> None:
     ranking_top_factors(sku, limit=limit)
 
 
-# === SUPPLY MODULE ===
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "cli"))
-from supply import supply as supply_group
 main.add_command(supply_group, "supply")
 if __name__ == "__main__":
     main()

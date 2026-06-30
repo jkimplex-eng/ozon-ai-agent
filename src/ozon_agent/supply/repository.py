@@ -1,14 +1,83 @@
 """Repository for supply proposals."""
+from __future__ import annotations
+
 import json
 import logging
-import uuid
-from datetime import datetime
 from typing import Any
 
 from ozon_agent.db.connection import get_connection
+
 from .models import ProposalStatus, SupplyProposal
 
 logger = logging.getLogger(__name__)
+
+PROPOSAL_COLUMNS = [
+    "proposal_id",
+    "sku",
+    "offer_id",
+    "product_name",
+    "quantity",
+    "target_warehouse_id",
+    "target_warehouse_name",
+    "target_cluster_id",
+    "target_cluster_name",
+    "reason",
+    "expected_prevented_loss",
+    "confidence",
+    "data_sources",
+    "status",
+    "draft_id",
+    "supply_id",
+    "timeslot_id",
+    "draft_payload",
+    "created_at",
+    "approved_at",
+    "approved_by",
+    "rejected_reason",
+    "error_message",
+]
+
+
+def _row_value(row: Any, key: str) -> Any:
+    if hasattr(row, "keys"):
+        return row[key]
+    return row[PROPOSAL_COLUMNS.index(key)]
+
+
+def _json_value(value: Any, default: Any) -> Any:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
+
+
+def _proposal_from_row(row: Any) -> SupplyProposal:
+    return SupplyProposal(
+        proposal_id=_row_value(row, "proposal_id"),
+        sku=_row_value(row, "sku"),
+        offer_id=_row_value(row, "offer_id"),
+        product_name=_row_value(row, "product_name"),
+        quantity=_row_value(row, "quantity"),
+        target_warehouse_id=_row_value(row, "target_warehouse_id"),
+        target_warehouse_name=_row_value(row, "target_warehouse_name"),
+        target_cluster_id=_row_value(row, "target_cluster_id"),
+        target_cluster_name=_row_value(row, "target_cluster_name"),
+        reason=_row_value(row, "reason"),
+        expected_prevented_loss=_row_value(row, "expected_prevented_loss"),
+        confidence=_row_value(row, "confidence"),
+        data_sources=_json_value(_row_value(row, "data_sources"), []),
+        status=ProposalStatus(_row_value(row, "status")),
+        draft_id=_row_value(row, "draft_id"),
+        supply_id=_row_value(row, "supply_id"),
+        timeslot_id=_row_value(row, "timeslot_id"),
+        draft_payload=_json_value(_row_value(row, "draft_payload"), None),
+        created_at=_row_value(row, "created_at"),
+        approved_at=_row_value(row, "approved_at"),
+        approved_by=_row_value(row, "approved_by"),
+        rejected_reason=_row_value(row, "rejected_reason"),
+        error_message=_row_value(row, "error_message"),
+    )
 
 
 def create_proposal(proposal: SupplyProposal) -> str:
@@ -25,7 +94,7 @@ def create_proposal(proposal: SupplyProposal) -> str:
         )
         RETURNING proposal_id
     """
-    
+
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -55,52 +124,17 @@ def create_proposal(proposal: SupplyProposal) -> str:
 
 def get_proposal(proposal_id: str) -> SupplyProposal | None:
     """Get proposal by ID."""
-    query = """
-        SELECT 
-            proposal_id, sku, offer_id, product_name, quantity,
-            target_warehouse_id, target_warehouse_name,
-            target_cluster_id, target_cluster_name,
-            reason, expected_prevented_loss, confidence,
-            data_sources, status, draft_id, supply_id, timeslot_id,
-            draft_payload, created_at, approved_at, approved_by,
-            rejected_reason, error_message
+    query = f"""
+        SELECT {", ".join(PROPOSAL_COLUMNS)}
         FROM supply_proposals
         WHERE proposal_id = %s
     """
-    
+
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(query, (proposal_id,))
             row = cur.fetchone()
-            
-            if not row:
-                return None
-            
-            return SupplyProposal(
-                proposal_id=row[0],
-                sku=row[1],
-                offer_id=row[2],
-                product_name=row[3],
-                quantity=row[4],
-                target_warehouse_id=row[5],
-                target_warehouse_name=row[6],
-                target_cluster_id=row[7],
-                target_cluster_name=row[8],
-                reason=row[9],
-                expected_prevented_loss=row[10],
-                confidence=row[11],
-                data_sources=row.get( data_sources, []) if isinstance(row.get(data_sources), list) else json.loads(row.get(data_sources, [])),
-                status=ProposalStatus(row[13]),
-                draft_id=row[14],
-                supply_id=row[15],
-                timeslot_id=row[16],
-                draft_payload=row.get(draft_payload) if isinstance(row.get(draft_payload), (dict, list)) else json.loads(row.get(draft_payload, null)),
-                created_at=row[18],
-                approved_at=row[19],
-                approved_by=row[20],
-                rejected_reason=row[21],
-                error_message=row[22],
-            )
+            return _proposal_from_row(row) if row else None
 
 
 def list_proposals(
@@ -108,62 +142,24 @@ def list_proposals(
     limit: int = 50,
 ) -> list[SupplyProposal]:
     """List proposals with optional status filter."""
-    query = """
-        SELECT 
-            proposal_id, sku, offer_id, product_name, quantity,
-            target_warehouse_id, target_warehouse_name,
-            target_cluster_id, target_cluster_name,
-            reason, expected_prevented_loss, confidence,
-            data_sources, status, draft_id, supply_id, timeslot_id,
-            draft_payload, created_at, approved_at, approved_by,
-            rejected_reason, error_message
+    query = f"""
+        SELECT {", ".join(PROPOSAL_COLUMNS)}
         FROM supply_proposals
     """
     params: list[Any] = []
-    
+
     if status:
         query += " WHERE status = %s"
         params.append(status.value)
-    
+
     query += " ORDER BY created_at DESC LIMIT %s"
     params.append(limit)
-    
+
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(query, params)
             rows = cur.fetchall()
-            
-            proposals = []
-            for row in rows:
-                proposals.append(
-                    SupplyProposal(
-                        proposal_id=row['proposal_id'],
-                        sku=row['sku'],
-                        offer_id=row['offer_id'],
-                        product_name=row['product_name'],
-                        quantity=row['quantity'],
-                        target_warehouse_id=row['target_warehouse_id'],
-                        target_warehouse_name=row['target_warehouse_name'],
-                        target_cluster_id=row['target_cluster_id'],
-                        target_cluster_name=row['target_cluster_name'],
-                        reason=row['reason'],
-                        expected_prevented_loss=row['expected_prevented_loss'],
-                        confidence=row['confidence'],
-                        data_sources=row["data_sources"] or [],
-                        status=ProposalStatus(row['status']),
-                        draft_id=row['draft_id'],
-                        supply_id=row['supply_id'],
-                        timeslot_id=row['timeslot_id'],
-                        draft_payload=row["draft_payload"] or None,
-                        created_at=row['created_at'],
-                        approved_at=row['approved_at'],
-                        approved_by=row['approved_by'],
-                        rejected_reason=row['rejected_reason'],
-                        error_message=row['error_message'],
-                    )
-                )
-            
-            return proposals
+            return [_proposal_from_row(row) for row in rows]
 
 
 def update_proposal_status(
@@ -173,32 +169,35 @@ def update_proposal_status(
 ) -> None:
     """Update proposal status and optional fields."""
     allowed_fields = {
-        "draft_id", "supply_id", "timeslot_id", "draft_payload",
-        "approved_at", "approved_by", "rejected_reason", "error_message",
+        "draft_id",
+        "supply_id",
+        "timeslot_id",
+        "draft_payload",
+        "approved_at",
+        "approved_by",
+        "rejected_reason",
+        "error_message",
     }
-    
+
     set_clauses = ["status = %s"]
     params: list[Any] = [status.value]
-    
+
     for field, value in kwargs.items():
         if field in allowed_fields:
             set_clauses.append(f"{field} = %s")
-            if isinstance(value, (dict, list)):
-                params.append(json.dumps(value))
-            else:
-                params.append(value)
-    
+            params.append(json.dumps(value) if isinstance(value, (dict, list)) else value)
+
     params.append(proposal_id)
-    
+
     query = f"""
         UPDATE supply_proposals
-        SET {', '.join(set_clauses)}
+        SET {", ".join(set_clauses)}
         WHERE proposal_id = %s
     """
-    
+
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(query, params)
             conn.commit()
-    
-    logger.info(f"Updated proposal {proposal_id} to status {status.value}")
+
+    logger.info("Updated proposal %s to status %s", proposal_id, status.value)
