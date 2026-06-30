@@ -237,11 +237,10 @@ class TestDataTruthAuditor:
 
         with patch('ozon_agent.supply.proposals.get_proposal', return_value=proposal):
             with patch('ozon_agent.supply.proposals.update_proposal_status') as mock_update:
-                with patch.object(manager, '_wait_for_draft_ready'):
+                with patch.object(manager, '_wait_for_draft_ready', return_value=draft_info):
                     with patch.object(manager, '_wait_for_supply_order', return_value='supply-1'):
                         with patch.object(manager._supply_client, 'create_draft', return_value={'draft_id': 'draft-1'}):
-                            with patch.object(manager._supply_client, 'get_draft_info', return_value=draft_info):
-                                with patch.object(manager._supply_client, 'create_supply_from_draft', return_value={} ) as mock_create_supply:
+                            with patch.object(manager._supply_client, 'create_supply_from_draft', return_value={} ) as mock_create_supply:
                                     result = manager.create_draft('test-id')
 
         assert 'draft-1' in result
@@ -252,3 +251,4 @@ class TestDataTruthAuditor:
         )
         assert mock_update.call_args_list[0].kwargs['target_warehouse_id'] == 222
         assert mock_update.call_args_list[0].kwargs['target_warehouse_name'] == 'Actual Ozon Warehouse'
+

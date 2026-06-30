@@ -160,8 +160,7 @@ class ProposalManager:
             if not draft_id:
                 raise RuntimeError(f"No draft_id in response: {draft_response}")
 
-            self._wait_for_draft_ready(draft_id)
-            draft_info = self._supply_client.get_draft_info(draft_id)
+            draft_info = self._wait_for_draft_ready(draft_id)
             actual_warehouse_id = int(draft_info.warehouse_id or proposal.target_warehouse_id)
             actual_warehouse_name = draft_info.warehouse_name or proposal.target_warehouse_name
 
@@ -257,13 +256,19 @@ class ProposalManager:
                 )
             return resolved[0]
 
-    def _wait_for_draft_ready(self, draft_id: str, max_wait: int = 60) -> None:
+    def _wait_for_draft_ready(self, draft_id: str, max_wait: int = 60):
         start_time = time.time()
 
         while time.time() - start_time < max_wait:
-            draft_info = self._supply_client.get_draft_info(draft_id)
+            try:
+                draft_info = self._supply_client.get_draft_info(draft_id)
+            except RuntimeError as exc:
+                if "429 Too Many Requests" in str(exc):
+                    time.sleep(2)
+                    continue
+                raise
             if draft_info.status == "SUCCESS":
-                return
+                return draft_info
             if draft_info.status == "FAILED":
                 raise RuntimeError(f"Draft creation failed for draft_id: {draft_id}")
             time.sleep(2)
@@ -308,5 +313,6 @@ class ProposalManager:
             time.sleep(2)
 
         raise RuntimeError(f"Timeout waiting for timeslot reservation (operation_id: {operation_id})")
+
 
 
