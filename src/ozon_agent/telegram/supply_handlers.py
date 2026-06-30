@@ -79,6 +79,16 @@ def _proposal_cluster_summary(proposals: list[SupplyProposal], title: str) -> st
     return _render_cluster_lines(items, title)
 
 
+def _cluster_names_for_supply() -> list[str]:
+    proposals = list_proposals(limit=50)
+    names = {
+        proposal.target_cluster_name
+        for proposal in proposals
+        if proposal.status in _ACTIONABLE_STATUSES and proposal.target_cluster_name
+    }
+    return sorted(names)
+
+
 def _fbo_cluster_summary(plans: list[object], title: str) -> str:
     items = [
         (
@@ -196,17 +206,23 @@ def _supply_fbo() -> str:
         return f"Error: {e}"
 
 
-def _supply_proposals() -> str:
+def _supply_proposals(cluster_name: str | None = None) -> str:
     try:
         proposals = list_proposals(limit=50)
         if not proposals:
             return "No supply proposals found."
 
         actionable = [proposal for proposal in proposals if proposal.status in _ACTIONABLE_STATUSES]
-        if actionable:
-            return _proposal_cluster_summary(actionable[:30], "Что нужно подсортировать сейчас")
+        if cluster_name:
+            actionable = [proposal for proposal in actionable if proposal.target_cluster_name == cluster_name]
+            proposals = [proposal for proposal in proposals if proposal.target_cluster_name == cluster_name]
 
-        return _proposal_cluster_summary(proposals[:20], "Последние предложения")
+        if actionable:
+            title = f"Что нужно подсортировать: {cluster_name}" if cluster_name else "Что нужно подсортировать сейчас"
+            return _proposal_cluster_summary(actionable[:30], title)
+
+        title = f"Последние предложения: {cluster_name}" if cluster_name else "Последние предложения"
+        return _proposal_cluster_summary(proposals[:20], title)
     except Exception as e:
         return f"Error: {e}"
 
@@ -277,8 +293,10 @@ def _supply_propose() -> str:
         return f"Error: {e}"
 
 
-def _latest_proposal(*statuses: ProposalStatus) -> SupplyProposal | None:
+def _latest_proposal_for_cluster(cluster_name: str | None, *statuses: ProposalStatus) -> SupplyProposal | None:
     proposals = list_proposals(limit=50)
+    if cluster_name:
+        proposals = [proposal for proposal in proposals if proposal.target_cluster_name == cluster_name]
     if not proposals:
         return None
 
@@ -300,6 +318,10 @@ def _latest_proposal(*statuses: ProposalStatus) -> SupplyProposal | None:
                 return proposal
 
     return proposals[0]
+
+
+def _latest_proposal(*statuses: ProposalStatus) -> SupplyProposal | None:
+    return _latest_proposal_for_cluster(None, *statuses)
 
 
 def _render_proposal(proposal: SupplyProposal) -> str:
@@ -482,4 +504,3 @@ def _handle_supply(parts: list[str]) -> str:
         return _supply_select_timeslot(parts[2], parts[3])
     else:
         return _supply_help()
-

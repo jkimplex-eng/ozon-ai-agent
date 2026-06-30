@@ -65,8 +65,10 @@ def test_supply_callback_show_uses_latest_proposal() -> None:
     proposal.proposal_id = "p-3"
     proposal.draft_id = None
     with patch("ozon_agent.telegram.callbacks.supply_cb._latest_proposal", return_value=proposal):
-        with patch("ozon_agent.telegram.callbacks.supply_cb._render_proposal", return_value="proposal card"):
-            response = route_callback_data("supply.show")
+        with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_names_for_supply", return_value=["Москва"]):
+            with patch("ozon_agent.telegram.callbacks.supply_cb._supply_proposals", return_value="Москва — 1 SKU, всего 70 шт"):
+                with patch("ozon_agent.telegram.callbacks.supply_cb._render_proposal", return_value="proposal card"):
+                    response = route_callback_data("supply.show")
 
     assert response is not None
     assert "proposal card" in response
@@ -78,7 +80,8 @@ def test_supply_callback_approve_routes_to_button_user() -> None:
     proposal.draft_id = None
     with patch("ozon_agent.telegram.callbacks.supply_cb._supply_approve", return_value="approved from button") as approve:
         with patch("ozon_agent.telegram.callbacks.supply_cb._latest_proposal", return_value=proposal):
-            response = route_callback_data("supply.approve|p-4")
+            with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_names_for_supply", return_value=["Москва"]):
+                response = route_callback_data("supply.approve|p-4")
 
     assert response == "approved from button"
     approve.assert_called_once_with("p-4", "telegram_button")
@@ -89,8 +92,10 @@ def test_supply_callback_payload_preserves_keyboard() -> None:
     proposal.proposal_id = "p-5"
     proposal.draft_id = None
     with patch("ozon_agent.telegram.callbacks.supply_cb._latest_proposal", return_value=proposal):
-        with patch("ozon_agent.telegram.callbacks.supply_cb._render_proposal", return_value="proposal card"):
-            text, reply_markup = route_callback_payload("supply.show")
+        with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_names_for_supply", return_value=["Москва"]):
+            with patch("ozon_agent.telegram.callbacks.supply_cb._supply_proposals", return_value="Москва — 1 SKU, всего 70 шт"):
+                with patch("ozon_agent.telegram.callbacks.supply_cb._render_proposal", return_value="proposal card"):
+                    text, reply_markup = route_callback_payload("supply.show")
 
     assert text is not None
     assert reply_markup is not None
@@ -129,3 +134,42 @@ def test_supply_proposals_groups_by_cluster_and_offer() -> None:
     assert "Москва — 2 SKU, всего 100 шт" in text
     assert "SJ11 — 70" in text
     assert "SJ28 — 30" in text
+
+
+def test_supply_proposals_filters_selected_cluster() -> None:
+    p1 = MagicMock()
+    p1.status = ProposalStatus.PROPOSED
+    p1.target_cluster_name = "Москва"
+    p1.offer_id = "SJ11"
+    p1.sku = 111
+    p1.quantity = 70
+
+    p2 = MagicMock()
+    p2.status = ProposalStatus.PROPOSED
+    p2.target_cluster_name = "Казань"
+    p2.offer_id = "SJ28"
+    p2.sku = 222
+    p2.quantity = 30
+
+    with patch("ozon_agent.telegram.supply_handlers.list_proposals", return_value=[p1, p2]):
+        from ozon_agent.telegram.supply_handlers import _supply_proposals
+        text = _supply_proposals("Москва")
+
+    assert "Москва — 1 SKU, всего 70 шт" in text
+    assert "SJ11 — 70" in text
+    assert "Казань" not in text
+
+
+def test_supply_cluster_callback_uses_cluster_summary() -> None:
+    proposal = MagicMock()
+    proposal.proposal_id = "p-cluster"
+    proposal.draft_id = None
+    with patch("ozon_agent.telegram.callbacks.supply_cb._latest_proposal_for_cluster", return_value=proposal):
+        with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_names_for_supply", return_value=["Москва", "Казань"]):
+            with patch("ozon_agent.telegram.callbacks.supply_cb._supply_proposals", return_value="Москва — 2 SKU, всего 100 шт"):
+                with patch("ozon_agent.telegram.callbacks.supply_cb._render_proposal", return_value="proposal card"):
+                    response = route_callback_data("supply.cluster|Москва")
+
+    assert response is not None
+    assert "Москва — 2 SKU, всего 100 шт" in response
+
