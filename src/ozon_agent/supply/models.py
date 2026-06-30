@@ -67,6 +67,7 @@ class DraftInfo:
 
     draft_id: str
     warehouse_id: int | None
+    warehouse_name: str | None
     items: list[dict[str, Any]]
     status: str
     created_at: str | None

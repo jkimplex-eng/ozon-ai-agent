@@ -209,3 +209,46 @@ class TestDataTruthAuditor:
         assert audit["mock_data_count"] == 0
 
 
+
+    def test_create_draft_uses_full_available_warehouse_from_draft_info(self):
+        client = MagicMock()
+        manager = ProposalManager(client)
+
+        proposal = SupplyProposal(
+            proposal_id="test-id",
+            sku=123,
+            offer_id="test",
+            product_name="Test",
+            quantity=100,
+            target_warehouse_id=111,
+            target_warehouse_name="Planned Warehouse",
+            target_cluster_id="4067",
+            target_cluster_name="Novosibirsk",
+            reason="Test",
+            expected_prevented_loss=100.0,
+            confidence=0.8,
+            data_sources=[],
+            status=ProposalStatus.OWNER_APPROVED,
+        )
+
+        draft_info = MagicMock()
+        draft_info.warehouse_id = 222
+        draft_info.warehouse_name = "Actual Ozon Warehouse"
+
+        with patch('ozon_agent.supply.proposals.get_proposal', return_value=proposal):
+            with patch('ozon_agent.supply.proposals.update_proposal_status') as mock_update:
+                with patch.object(manager, '_wait_for_draft_ready'):
+                    with patch.object(manager, '_wait_for_supply_order', return_value='supply-1'):
+                        with patch.object(manager._supply_client, 'create_draft', return_value={'draft_id': 'draft-1'}):
+                            with patch.object(manager._supply_client, 'get_draft_info', return_value=draft_info):
+                                with patch.object(manager._supply_client, 'create_supply_from_draft', return_value={} ) as mock_create_supply:
+                                    result = manager.create_draft('test-id')
+
+        assert 'draft-1' in result
+        mock_create_supply.assert_called_once_with(
+            draft_id='draft-1',
+            cluster_id='4067',
+            warehouse_id=222,
+        )
+        assert mock_update.call_args_list[0].kwargs['target_warehouse_id'] == 222
+        assert mock_update.call_args_list[0].kwargs['target_warehouse_name'] == 'Actual Ozon Warehouse'

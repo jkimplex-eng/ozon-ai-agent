@@ -161,10 +161,14 @@ class ProposalManager:
                 raise RuntimeError(f"No draft_id in response: {draft_response}")
 
             self._wait_for_draft_ready(draft_id)
+            draft_info = self._supply_client.get_draft_info(draft_id)
+            actual_warehouse_id = int(draft_info.warehouse_id or proposal.target_warehouse_id)
+            actual_warehouse_name = draft_info.warehouse_name or proposal.target_warehouse_name
+
             create_response = self._supply_client.create_supply_from_draft(
                 draft_id=draft_id,
                 cluster_id=cluster_id,
-                warehouse_id=int(proposal.target_warehouse_id),
+                warehouse_id=actual_warehouse_id,
             )
             error_reasons = create_response.get("error_reasons") or []
             if error_reasons:
@@ -178,6 +182,8 @@ class ProposalManager:
                 draft_id=draft_id,
                 supply_id=supply_id,
                 draft_payload=payload.to_api_dict(),
+                target_warehouse_id=actual_warehouse_id,
+                target_warehouse_name=actual_warehouse_name,
             )
 
             logger.info(
@@ -302,3 +308,5 @@ class ProposalManager:
             time.sleep(2)
 
         raise RuntimeError(f"Timeout waiting for timeslot reservation (operation_id: {operation_id})")
+
+

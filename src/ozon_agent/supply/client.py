@@ -177,6 +177,7 @@ class SupplyAPIClient:
         return DraftInfo(
             draft_id=str(response.get("draft_id") or draft_id),
             warehouse_id=(first_warehouse or {}).get("warehouse_id"),
+            warehouse_name=(first_warehouse or {}).get("name"),
             items=[],
             status=str(response.get("status") or "unknown"),
             created_at=None,
@@ -317,4 +318,6 @@ def _parse_timeslot_id(timeslot_id: str) -> tuple[str, str]:
     if len(parts) < 2:
         raise ValueError(f"Invalid timeslot_id: {timeslot_id}")
     return parts[0], parts[1]
+
+
 

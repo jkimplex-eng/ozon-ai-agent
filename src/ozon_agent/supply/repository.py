@@ -188,6 +188,8 @@ def update_proposal_status(
     allowed_fields = {
         "draft_id",
         "supply_id",
+        "target_warehouse_id",
+        "target_warehouse_name",
         "timeslot_id",
         "draft_payload",
         "approved_at",
@@ -218,3 +220,5 @@ def update_proposal_status(
             conn.commit()
 
     logger.info("Updated proposal %s to status %s", proposal_id, status.value)
+
+
