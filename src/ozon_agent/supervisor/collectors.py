@@ -1,15 +1,24 @@
 """Data collectors for audit report."""
+
 import os
 import subprocess
 from typing import Any
 
 
+def _run_command(command: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+    )
+
+
 def get_git_status() -> str:
     try:
-        result = subprocess.run(
-            ["git", "status", "--short"],
-            capture_output=True, text=True, timeout=10,
-        )
+        result = _run_command(["git", "status", "--short"], timeout=10)
         return result.stdout.strip() or "clean"
     except Exception:
         return "unknown"
@@ -17,15 +26,9 @@ def get_git_status() -> str:
 
 def get_changed_files() -> list[str]:
     try:
-        result = subprocess.run(
-            ["git", "diff", "--name-only", "HEAD~1"],
-            capture_output=True, text=True, timeout=10,
-        )
+        result = _run_command(["git", "diff", "--name-only", "HEAD~1"], timeout=10)
         if result.returncode != 0:
-            result = subprocess.run(
-                ["git", "diff", "--name-only"],
-                capture_output=True, text=True, timeout=10,
-            )
+            result = _run_command(["git", "diff", "--name-only"], timeout=10)
         files = result.stdout.strip().split("\n") if result.stdout.strip() else []
         return [f for f in files if f]
     except Exception:
@@ -34,15 +37,17 @@ def get_changed_files() -> list[str]:
 
 def get_test_results() -> dict[str, Any]:
     results: dict[str, Any] = {
-        "total": 0, "passed": 0, "failed": 0,
-        "lint_status": "unknown", "type_status": "unknown",
+        "total": 0,
+        "passed": 0,
+        "failed": 0,
+        "lint_status": "unknown",
+        "type_status": "unknown",
     }
 
     if "PYTEST_CURRENT_TEST" not in os.environ:
         try:
-            result = subprocess.run(
-                ["python", "-m", "pytest", "tests/", "-q", "--tb=no"],
-                capture_output=True, text=True, timeout=120,
+            result = _run_command(
+                ["python", "-m", "pytest", "tests/", "-q", "--tb=no"], timeout=120
             )
             output = result.stdout
             for line in output.split("\n"):
@@ -62,19 +67,13 @@ def get_test_results() -> dict[str, Any]:
             pass
 
     try:
-        result = subprocess.run(
-            ["python", "-m", "ruff", "check", "src/", "tests/", "-q"],
-            capture_output=True, text=True, timeout=60,
-        )
+        result = _run_command(["python", "-m", "ruff", "check", "src/", "tests/", "-q"], timeout=60)
         results["lint_status"] = "pass" if result.returncode == 0 else "fail"
     except Exception:
         pass
 
     try:
-        result = subprocess.run(
-            ["python", "-m", "mypy", "src/"],
-            capture_output=True, text=True, timeout=60,
-        )
+        result = _run_command(["python", "-m", "mypy", "src/"], timeout=60)
         results["type_status"] = "pass" if result.returncode == 0 else "fail"
     except Exception:
         pass
@@ -119,6 +118,7 @@ def detect_architecture_risks() -> list[str]:
 
     try:
         import importlib
+
         for mod in ["psycopg", "pandas", "xgboost", "lightgbm", "prophet"]:
             try:
                 importlib.import_module(mod)
@@ -128,9 +128,8 @@ def detect_architecture_risks() -> list[str]:
         pass
 
     try:
-        result = subprocess.run(
-            ["python", "-c", "from ozon_agent.db.connection import get_pool"],
-            capture_output=True, text=True, timeout=10,
+        result = _run_command(
+            ["python", "-c", "from ozon_agent.db.connection import get_pool"], timeout=10
         )
         if result.returncode != 0 and "DATABASE_URL" in result.stderr:
             risks.append("DATABASE_URL not configured — DB features will fail")
@@ -161,9 +160,7 @@ def check_decision_engine_safety() -> list[str]:
     import os
 
     risks: list[str] = []
-    decision_dir = os.path.join(
-        os.path.dirname(__file__), "..", "decision"
-    )
+    decision_dir = os.path.join(os.path.dirname(__file__), "..", "decision")
     if not os.path.isdir(decision_dir):
         return risks
 
@@ -180,8 +177,7 @@ def check_decision_engine_safety() -> list[str]:
         for keyword in FORBIDDEN_KEYWORDS:
             if keyword in content:
                 risks.append(
-                    f"Decision engine contains forbidden keyword '{keyword}' "
-                    f"in {filename}"
+                    f"Decision engine contains forbidden keyword '{keyword}' in {filename}"
                 )
 
     return risks
@@ -242,8 +238,7 @@ def check_approval_safety() -> list[str]:
             for keyword in FORBIDDEN_KEYWORDS_EXTENDED:
                 if keyword in content:
                     risks.append(
-                        f"{module_name} module contains forbidden keyword "
-                        f"'{keyword}' in {filename}"
+                        f"{module_name} module contains forbidden keyword '{keyword}' in {filename}"
                     )
     return risks
 
