@@ -107,17 +107,17 @@ def check_env_vars(target: str) -> dict[str, Any]:
 
 
 def check_sheets_sync_dry_run(target: str) -> dict[str, Any]:
-    """Run sheets sync dry run."""
+    """Check that Sheets sync status is available without issuing write requests."""
     cmd = (
-        "cd /root/ozon-ai-agent && "
-        "SHEETS_DATA_SOURCE=files "
-        "python -m ozon_agent.cli sheets sync --source files --delay 5 2>&1 | tail -15"
+        "cd /root/ozon-ai-agent && source .venv/bin/activate "
+        "&& python -m ozon_agent.cli sheets status 2>&1 | tail -20"
     )
-    result = run_ssh_command(target, cmd, timeout=120)
+    result = run_ssh_command(target, cmd, timeout=30)
     output = result["stdout"]
+    has_history = "No sync history" not in output
     has_failed = "FAILED" in output
     return {
-        "healthy": result["success"] and not has_failed,
+        "healthy": result["success"] and has_history and not has_failed,
         "output": output,
     }
 

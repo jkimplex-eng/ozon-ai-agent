@@ -16,6 +16,8 @@ def run_ssh_command(target: str, command: str, timeout: int = 120) -> dict[str, 
             full_cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
         return {
@@ -85,9 +87,9 @@ def execute_deploy(
             "supervisorctl status ozon-sheets-watch | grep -q RUNNING",
         ),
         (
-            "Sheets sync smoke",
-            f"cd {deploy_dir} && source {venv} && SHEETS_DATA_SOURCE=files "
-            "python -m ozon_agent.cli sheets sync --source files --delay 10",
+            "Sheets status smoke",
+            f"cd {deploy_dir} && source {venv} "
+            "&& python -m ozon_agent.cli sheets status >/dev/null",
         ),
     ]
 
@@ -135,5 +137,3 @@ def execute_health_check(target: str) -> dict[str, Any]:
         "healthy": all_healthy,
         "checks": results,
     }
-
-
