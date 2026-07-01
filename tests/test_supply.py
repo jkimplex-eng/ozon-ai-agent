@@ -185,6 +185,68 @@ class TestProposalManager:
                 assert proposals[0].status == ProposalStatus.PROPOSED
                 mock_create.assert_called_once()
 
+    def test_create_proposals_from_plans_refreshes_existing_proposed(self):
+        client = MagicMock()
+        manager = ProposalManager(client)
+
+        existing = SupplyProposal(
+            proposal_id="existing-id",
+            sku=123,
+            offer_id="test-offer",
+            product_name="Test Product",
+            quantity=100,
+            target_warehouse_id=1,
+            target_warehouse_name="Old Warehouse",
+            target_cluster_id="test",
+            target_cluster_name="Москва",
+            reason="Old reason",
+            expected_prevented_loss=1000.0,
+            confidence=0.5,
+            data_sources=["sales"],
+            status=ProposalStatus.PROPOSED,
+        )
+        refreshed = SupplyProposal(
+            proposal_id="existing-id",
+            sku=123,
+            offer_id="test-offer",
+            product_name="Test Product",
+            quantity=16,
+            target_warehouse_id=2,
+            target_warehouse_name="New Warehouse",
+            target_cluster_id="test2",
+            target_cluster_name="Москва",
+            reason="New reason",
+            expected_prevented_loss=0.0,
+            confidence=0.9,
+            data_sources=["orders.city"],
+            status=ProposalStatus.PROPOSED,
+        )
+        plans = [
+            {
+                "sku": 123,
+                "offer_id": "test-offer",
+                "product_name": "Test Product",
+                "quantity": 16,
+                "target_warehouse_id": 2,
+                "target_warehouse_name": "New Warehouse",
+                "target_cluster_id": "test2",
+                "target_cluster_name": "Москва",
+                "reason": "New reason",
+                "expected_prevented_loss": 0.0,
+                "confidence": 0.9,
+                "data_sources": ["orders.city"],
+            }
+        ]
+
+        with patch.object(manager, '_check_duplicate_proposal', return_value=existing):
+            with patch('ozon_agent.supply.proposals.update_proposal_fields') as mock_update:
+                with patch('ozon_agent.supply.proposals.get_proposal', return_value=refreshed):
+                    proposals = manager.create_proposals_from_plans(plans)
+
+        assert len(proposals) == 1
+        assert proposals[0].quantity == 16
+        mock_update.assert_called_once()
+
     def test_approve_proposal(self):
         """Test proposal approval."""
         client = MagicMock()

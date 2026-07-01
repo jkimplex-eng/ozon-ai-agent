@@ -179,6 +179,47 @@ def list_proposals(
             return [_proposal_from_row(row) for row in rows]
 
 
+def update_proposal_fields(proposal_id: str, **kwargs: Any) -> None:
+    """Update mutable proposal fields without changing status."""
+    allowed_fields = {
+        "quantity",
+        "target_warehouse_id",
+        "target_warehouse_name",
+        "target_cluster_id",
+        "target_cluster_name",
+        "reason",
+        "expected_prevented_loss",
+        "confidence",
+        "data_sources",
+        "draft_payload",
+        "error_message",
+    }
+
+    set_clauses: list[str] = []
+    params: list[Any] = []
+    for field, value in kwargs.items():
+        if field in allowed_fields:
+            set_clauses.append(f"{field} = %s")
+            params.append(json.dumps(value) if isinstance(value, (dict, list)) else value)
+
+    if not set_clauses:
+        return
+
+    params.append(proposal_id)
+    query = f"""
+        UPDATE supply_proposals
+        SET {", ".join(set_clauses)}
+        WHERE proposal_id = %s
+    """
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            conn.commit()
+
+    logger.info("Updated proposal fields for %s", proposal_id)
+
+
 def update_proposal_status(
     proposal_id: str,
     status: ProposalStatus,

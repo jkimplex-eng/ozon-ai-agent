@@ -15,6 +15,7 @@ from ozon_agent.supply.repository import (
     create_proposal,
     get_proposal,
     list_proposals,
+    update_proposal_fields,
     update_proposal_status,
 )
 
@@ -49,7 +50,10 @@ class ProposalManager:
             )
 
             if existing:
-                logger.info("Skipping duplicate proposal for SKU %s in %s", plan["sku"], city_name)
+                if existing.status == ProposalStatus.PROPOSED:
+                    proposals.append(self._refresh_existing_proposal(existing, plan, city_name))
+                else:
+                    logger.info("Skipping duplicate actionable proposal for SKU %s in %s", plan["sku"], city_name)
                 continue
 
             draft_payload = {
@@ -87,6 +91,42 @@ class ProposalManager:
             logger.info("Created proposal %s for SKU %s", proposal.proposal_id, proposal.sku)
 
         return proposals
+
+    def _refresh_existing_proposal(
+        self,
+        proposal: SupplyProposal,
+        plan: dict[str, Any],
+        city_name: str,
+    ) -> SupplyProposal:
+        draft_payload = {
+            "warehouse_id": plan["target_warehouse_id"],
+            "cluster_id": str(plan["target_cluster_id"]),
+            "items": [
+                {
+                    "sku": plan["sku"],
+                    "quantity": plan["quantity"],
+                }
+            ],
+        }
+        update_proposal_fields(
+            proposal_id=str(proposal.proposal_id),
+            quantity=plan["quantity"],
+            target_warehouse_id=plan["target_warehouse_id"],
+            target_warehouse_name=plan["target_warehouse_name"],
+            target_cluster_id=str(plan["target_cluster_id"]),
+            target_cluster_name=city_name,
+            reason=plan["reason"],
+            expected_prevented_loss=plan["expected_prevented_loss"],
+            confidence=plan["confidence"],
+            data_sources=plan["data_sources"],
+            draft_payload=draft_payload,
+            error_message=None,
+        )
+        refreshed = get_proposal(str(proposal.proposal_id))
+        if refreshed is None:
+            raise ValueError(f"Proposal not found after refresh: {proposal.proposal_id}")
+        logger.info("Refreshed proposal %s for SKU %s in %s", refreshed.proposal_id, refreshed.sku, city_name)
+        return refreshed
 
     def _check_duplicate_proposal(
         self,
