@@ -291,7 +291,7 @@ def _supply_fbo() -> str:
         plans = engine.generate_cluster_demand(max_rows=100)
 
         if not plans:
-            return "No FBO demand rows generated."
+            return "Нет подтвержденных FBO-данных по городам для расчета. Сначала нужна свежая синхронизация заказов FBO."
 
         summary = _fbo_cluster_summary(plans, "Что нужно подсортировать сейчас")
         return (
@@ -358,7 +358,7 @@ def _supply_fbo_propose() -> str:
         fbo_rows = engine.generate_cluster_demand(max_rows=100)
         plans = [p for p in (_fbo_plan_to_supply_plan(row) for row in fbo_rows) if p][:30]
         if not plans:
-            return "No FBO proposals to create."
+            return "Нет подтвержденного спроса FBO по городам для создания поставок."
         proposals = manager.create_proposals_from_plans(plans)
         if not proposals:
             return "No new FBO proposals created."
@@ -665,3 +665,4 @@ def _handle_supply(parts: list[str]) -> str:
         return _supply_select_timeslot(parts[2], parts[3])
     else:
         return _supply_help()
+

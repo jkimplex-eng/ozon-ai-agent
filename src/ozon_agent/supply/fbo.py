@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -44,6 +45,8 @@ class FboDemandPlan:
     recommended_30: int
     recommended_60: int
     recommended_90: int
+    city_sales: int
+    planning_mode: str
     confidence: float
     data_sources: list[str]
     data_quality_note: str
@@ -67,6 +70,8 @@ class FboDemandPlan:
             "recommended_30": self.recommended_30,
             "recommended_60": self.recommended_60,
             "recommended_90": self.recommended_90,
+            "city_sales": self.city_sales,
+            "planning_mode": self.planning_mode,
             "confidence": self.confidence,
             "data_sources": self.data_sources,
             "data_quality_note": self.data_quality_note,
@@ -120,10 +125,16 @@ def build_fbo_demand_plans(
             continue
 
         avg_daily_sales = total_sales / days_with_sales
-        shares = _city_shares(sku, city_targets, stock_index)
+        shares, planning_mode, city_sales_map = _resolve_city_shares(product, city_targets, stock_index)
+        if not shares:
+            continue
+
         for city_name, warehouse in city_targets.items():
-            current_stock = stock_index.get((sku, city_name), 0)
             share = shares.get(city_name, 0.0)
+            if share <= 0:
+                continue
+
+            current_stock = stock_index.get((sku, city_name), 0)
             plans.append(
                 _build_one_plan(
                     product=product,
@@ -134,6 +145,8 @@ def build_fbo_demand_plans(
                     current_stock=current_stock,
                     days_with_sales=days_with_sales,
                     total_sales=total_sales,
+                    city_sales=int(city_sales_map.get(city_name, 0)),
+                    planning_mode=planning_mode,
                 )
             )
 
@@ -149,16 +162,15 @@ def _build_one_plan(
     current_stock: int,
     days_with_sales: int,
     total_sales: float,
+    city_sales: int,
+    planning_mode: str,
 ) -> FboDemandPlan:
     city_daily_sales = avg_daily_sales * cluster_share
     demand = {horizon: ceil(city_daily_sales * horizon) for horizon in DEFAULT_HORIZONS}
     recommended = {horizon: max(0, demand[horizon] - current_stock) for horizon in DEFAULT_HORIZONS}
     stock_days = current_stock / city_daily_sales if city_daily_sales > 0 else None
-    confidence = _confidence(days_with_sales, total_sales, cluster_share)
-    note = str(product.get("data_quality_note") or "") or (
-        "City demand is estimated from SKU sales and aggregated city stock; "
-        "Ozon warehouse routing inside the city is selected automatically."
-    )
+    confidence = _confidence(days_with_sales, total_sales, cluster_share, planning_mode)
+    note = str(product.get("data_quality_note") or "") or _planning_note(planning_mode)
     sources = list(product.get("data_sources") or ["products", "sales", "stocks", "supply_warehouses"])
     if "supply_warehouses" not in sources:
         sources.append("supply_warehouses")
@@ -181,6 +193,8 @@ def _build_one_plan(
         recommended_30=recommended[30],
         recommended_60=recommended[60],
         recommended_90=recommended[90],
+        city_sales=city_sales,
+        planning_mode=planning_mode,
         confidence=confidence,
         data_sources=sources,
         data_quality_note=note,
@@ -188,10 +202,120 @@ def _build_one_plan(
 
 
 def _load_product_sales(skus: list[str] | None, lookback_days: int, limit: int) -> list[dict[str, Any]]:
+    order_rows = _load_product_sales_from_orders_db(skus=skus, lookback_days=lookback_days, limit=limit)
+    if order_rows:
+        return order_rows
+
     db_rows = _load_product_sales_from_db(skus=skus, lookback_days=lookback_days, limit=limit)
     if db_rows:
         return db_rows
-    return _load_product_sales_from_files(skus=skus, lookback_days=lookback_days, limit=limit)
+
+    if _allow_file_fallback():
+        return _load_product_sales_from_files(skus=skus, lookback_days=lookback_days, limit=limit)
+    return []
+
+
+def _load_product_sales_from_orders_db(
+    skus: list[str] | None,
+    lookback_days: int,
+    limit: int,
+) -> list[dict[str, Any]]:
+    params: list[Any] = [lookback_days]
+    sku_filter = ""
+    if skus:
+        sku_filter = "AND o.sku = ANY(%s)"
+        params.append([str(sku) for sku in skus])
+
+    try:
+        rows = execute_query(
+            f"""
+            SELECT
+                p.sku,
+                p.offer_id,
+                p.name,
+                COALESCE(NULLIF(o.city, ''), NULLIF(o.region, ''), '') AS demand_city,
+                DATE(o.created_at) AS order_date,
+                COALESCE(SUM(o.quantity), 0) AS city_sales
+            FROM orders o
+            JOIN products p ON p.sku = o.sku
+            WHERE o.scheme = 'FBO'
+              AND o.created_at >= CURRENT_DATE - (%s::int * INTERVAL '1 day')
+              AND COALESCE(o.quantity, 0) > 0
+              {sku_filter}
+            GROUP BY p.sku, p.offer_id, p.name, demand_city, DATE(o.created_at)
+            """,
+            tuple(params),
+        )
+    except Exception:
+        return []
+
+    by_sku: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        sku = str(row.get("sku") or "").strip()
+        if not sku:
+            continue
+
+        qty = int(row.get("city_sales") or 0)
+        if qty <= 0:
+            continue
+
+        item = by_sku.setdefault(
+            sku,
+            {
+                "sku": sku,
+                "offer_id": str(row.get("offer_id") or ""),
+                "name": str(row.get("name") or ""),
+                "total_sales": 0,
+                "days_with_sales_set": set(),
+                "city_sales_map": defaultdict(int),
+                "data_sources": ["orders.city", "products"],
+                "planning_mode": "orders_city_history",
+                "data_quality_note": (
+                    "Demand is based on real FBO order history by destination city; "
+                    "Ozon warehouse routing inside the city is selected automatically."
+                ),
+            },
+        )
+        item["total_sales"] += qty
+
+        order_date = row.get("order_date")
+        if order_date:
+            item["days_with_sales_set"].add(str(order_date))
+
+        raw_city = str(row.get("demand_city") or "").strip()
+        if not raw_city:
+            continue
+
+        city_name = canonical_supply_city(raw_city)
+        if city_name:
+            item["city_sales_map"][city_name] += qty
+
+    result: list[dict[str, Any]] = []
+    for item in by_sku.values():
+        city_sales_map = {
+            city_name: int(qty)
+            for city_name, qty in dict(item["city_sales_map"]).items()
+            if int(qty) > 0
+        }
+        if not city_sales_map:
+            continue
+
+        result.append(
+            {
+                "sku": item["sku"],
+                "offer_id": item["offer_id"],
+                "name": item["name"],
+                "total_sales": int(item["total_sales"]),
+                "days_with_sales": max(1, len(item["days_with_sales_set"])),
+                "city_sales_map": city_sales_map,
+                "data_sources": list(item["data_sources"]),
+                "planning_mode": item["planning_mode"],
+                "data_quality_note": item["data_quality_note"],
+            }
+        )
+
+    result.sort(key=lambda item: (-float(item["total_sales"]), item["sku"]))
+    return result[:limit]
 
 
 def _load_product_sales_from_db(
@@ -207,7 +331,7 @@ def _load_product_sales_from_db(
     params.append(limit)
 
     try:
-        return execute_query(
+        rows = execute_query(
             f"""
             SELECT
                 p.sku,
@@ -216,7 +340,7 @@ def _load_product_sales_from_db(
                 COALESCE(SUM(s.quantity), 0) AS total_sales,
                 COUNT(DISTINCT s.date) AS days_with_sales,
                 ARRAY['products','sales'] AS data_sources,
-                'Demand based on PostgreSQL sales history.' AS data_quality_note
+                'Demand based on PostgreSQL sales history without city split.' AS data_quality_note
             FROM products p
             JOIN sales s ON s.product_id = p.id
             WHERE s.date >= CURRENT_DATE - (%s::int * INTERVAL '1 day')
@@ -231,6 +355,21 @@ def _load_product_sales_from_db(
     except Exception:
         return []
 
+    allow_estimated = _allow_estimated_city_share()
+    for row in rows:
+        row["planning_mode"] = "sales_history_estimated"
+        row["allow_estimated_city_share"] = allow_estimated
+        if allow_estimated:
+            row["data_quality_note"] = (
+                "Demand is based on PostgreSQL sales history; city split is estimated from stock distribution."
+            )
+        else:
+            row["data_quality_note"] = (
+                "Sales history exists, but city split is unavailable. "
+                "Estimated city allocation is disabled in production mode."
+            )
+    return rows
+
 
 def _load_product_sales_from_files(
     skus: list[str] | None,
@@ -243,6 +382,7 @@ def _load_product_sales_from_files(
 
     sku_filter = {str(sku) for sku in skus} if skus else None
     catalog = _load_product_catalog()
+    allow_estimated = _allow_estimated_city_share()
     result: list[dict[str, Any]] = []
 
     for row in rows:
@@ -264,9 +404,13 @@ def _load_product_sales_from_files(
                 "total_sales": total_sales,
                 "days_with_sales": days_with_sales,
                 "data_sources": ["analytics_data.json"],
+                "planning_mode": "analytics_file_estimated",
+                "allow_estimated_city_share": allow_estimated,
                 "data_quality_note": (
                     "Demand is estimated from analytics_data.json period totals; "
                     "city allocation uses aggregated stock by city."
+                    if allow_estimated
+                    else "analytics_data.json exists, but file-based city estimation is disabled in production mode."
                 ),
             }
         )
@@ -429,6 +573,36 @@ def _city_targets(warehouses: list[Warehouse]) -> dict[str, Warehouse]:
     return targets
 
 
+def _resolve_city_shares(
+    product: dict[str, Any],
+    city_targets: dict[str, Warehouse],
+    stock_index: dict[tuple[str, str], int],
+) -> tuple[dict[str, float], str, dict[str, int]]:
+    planning_mode = str(product.get("planning_mode") or "")
+    city_sales_map = _normalized_city_sales_map(product.get("city_sales_map"))
+    if city_sales_map:
+        matched_sales = {
+            city_name: int(city_sales_map.get(city_name, 0))
+            for city_name in city_targets
+            if int(city_sales_map.get(city_name, 0)) > 0
+        }
+        total_sales = sum(matched_sales.values())
+        if total_sales > 0:
+            shares = {city_name: qty / total_sales for city_name, qty in matched_sales.items()}
+            return shares, planning_mode or "orders_city_history", matched_sales
+
+    if not bool(product.get("allow_estimated_city_share")):
+        return {}, planning_mode or "insufficient_city_signal", {}
+
+    shares = _city_shares(str(product.get("sku") or ""), city_targets, stock_index)
+    estimated_city_sales = {
+        city_name: max(0, int(round(float(product.get("total_sales") or 0) * share)))
+        for city_name, share in shares.items()
+        if share > 0
+    }
+    return shares, planning_mode or "stock_weighted_estimate", estimated_city_sales
+
+
 def _city_shares(
     sku: str,
     city_targets: dict[str, Warehouse],
@@ -446,12 +620,47 @@ def _city_shares(
     return {city_name: equal_share for city_name in city_targets}
 
 
+def _normalized_city_sales_map(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+
+    result: dict[str, int] = defaultdict(int)
+    for raw_city, raw_qty in value.items():
+        city_name = canonical_supply_city(raw_city)
+        qty = int(raw_qty or 0)
+        if city_name and qty > 0:
+            result[city_name] += qty
+    return dict(result)
+
+
+def _allow_estimated_city_share() -> bool:
+    return os.getenv("FBO_ALLOW_ESTIMATED_CITY_SHARE", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _allow_file_fallback() -> bool:
+    return os.getenv("FBO_ALLOW_FILE_FALLBACK", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _planning_note(planning_mode: str) -> str:
+    if planning_mode == "orders_city_history":
+        return (
+            "Demand is based on real FBO order history by destination city; "
+            "Ozon warehouse routing inside the city is selected automatically."
+        )
+    if planning_mode == "sales_history_estimated":
+        return "Demand is based on sales history, but city split is estimated from stock distribution."
+    if planning_mode == "analytics_file_estimated":
+        return "Demand is estimated from analytics_data.json period totals and stock distribution."
+    return "City demand signal is insufficient for a trusted recommendation."
+
+
 def _normalize_warehouse_name(value: str) -> str:
     return re.sub(r"[\W_]+", "", value, flags=re.UNICODE).casefold()
 
 
-def _confidence(days_with_sales: int, total_sales: float, cluster_share: float) -> float:
+def _confidence(days_with_sales: int, total_sales: float, cluster_share: float, planning_mode: str) -> float:
     history_score = min(0.7, days_with_sales / 90 * 0.7)
     volume_score = min(0.2, total_sales / 1000 * 0.2)
     share_score = 0.1 if cluster_share > 0 else 0.0
-    return round(min(0.95, history_score + volume_score + share_score), 2)
+    mode_score = 0.1 if planning_mode == "orders_city_history" else 0.0
+    return round(min(0.95, history_score + volume_score + share_score + mode_score), 2)

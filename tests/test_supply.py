@@ -74,13 +74,46 @@ class TestSupplyPlanningEngine:
 
 
 class TestFboPlanning:
-    def test_build_fbo_demand_for_30_60_90_by_cluster(self):
+    def test_build_fbo_demand_uses_real_city_order_history(self):
         products = [{
             "sku": "123",
             "offer_id": "offer-123",
             "name": "Test Product",
             "total_sales": 90,
             "days_with_sales": 30,
+            "city_sales_map": {"Moscow": 30, "Kazan": 60},
+            "planning_mode": "orders_city_history",
+        }]
+        stocks = [
+            {"sku": "123", "warehouse_name": "Moscow WH", "current_stock": 5},
+            {"sku": "123", "warehouse_name": "Kazan WH", "current_stock": 10},
+        ]
+        warehouses = [
+            Warehouse(1, "Moscow WH", "msk", "Moscow", True),
+            Warehouse(2, "Kazan WH", "kzn", "Kazan", True),
+        ]
+
+        plans = build_fbo_demand_plans(products, stocks, warehouses)
+
+        assert len(plans) == 2
+        by_cluster = {plan.cluster_id: plan for plan in plans}
+        assert by_cluster["msk"].demand_30 == 30
+        assert by_cluster["kzn"].demand_30 == 60
+        assert by_cluster["msk"].recommended_30 == 25
+        assert by_cluster["kzn"].recommended_30 == 50
+        assert by_cluster["msk"].city_sales == 30
+        assert by_cluster["kzn"].planning_mode == "orders_city_history"
+        assert "real FBO order history" in by_cluster["msk"].data_quality_note
+
+    def test_build_fbo_demand_can_use_estimated_split_when_explicitly_allowed(self):
+        products = [{
+            "sku": "123",
+            "offer_id": "offer-123",
+            "name": "Test Product",
+            "total_sales": 90,
+            "days_with_sales": 30,
+            "planning_mode": "sales_history_estimated",
+            "allow_estimated_city_share": True,
         }]
         stocks = [
             {"sku": "123", "warehouse_name": "Moscow WH", "current_stock": 15},
@@ -97,17 +130,18 @@ class TestFboPlanning:
         by_cluster = {plan.cluster_id: plan for plan in plans}
         assert by_cluster["msk"].demand_30 == 23
         assert by_cluster["kzn"].demand_30 == 68
-        assert by_cluster["msk"].recommended_60 == 30
-        assert by_cluster["kzn"].recommended_90 == 158
+        assert by_cluster["msk"].planning_mode == "sales_history_estimated"
         assert "estimated" in by_cluster["msk"].data_quality_note
 
-    def test_build_fbo_demand_uses_equal_share_without_stock(self):
+    def test_build_fbo_demand_skips_sku_without_city_signal_in_production_mode(self):
         products = [{
             "sku": "123",
             "offer_id": "offer-123",
             "name": "Test Product",
             "total_sales": 60,
             "days_with_sales": 30,
+            "planning_mode": "sales_history_estimated",
+            "allow_estimated_city_share": False,
         }]
         warehouses = [
             Warehouse(1, "Moscow WH", "msk", "Moscow", True),
@@ -116,8 +150,7 @@ class TestFboPlanning:
 
         plans = build_fbo_demand_plans(products, [], warehouses)
 
-        assert [plan.demand_30 for plan in plans] == [30, 30]
-        assert [plan.recommended_30 for plan in plans] == [30, 30]
+        assert plans == []
 
 
 class TestProposalManager:
@@ -395,4 +428,5 @@ class TestDataTruthAuditor:
         assert 'supply-1' in result
         mock_reserve.assert_called_once_with(supply_order_id='supply-1', timeslot_id='slot-1')
         assert mock_update.call_count == 2
+
 
