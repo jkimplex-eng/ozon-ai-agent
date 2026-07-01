@@ -11,6 +11,8 @@ _CITY_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Краснодар", ("краснодар", "krasnodar")),
 )
 
+_KNOWN_CITIES = {city for city, _patterns in _CITY_PATTERNS}
+_DEFAULT_DEMAND_CITY = "Москва"
 
 _DEFECT_TOKENS = ("возврат", "return", "негабарит", "oversize", "ювелир", "jewelry", "аптека", "pharmacy")
 
@@ -26,6 +28,13 @@ def canonical_supply_city(*values: Any) -> str:
             return city
 
     return text
+
+
+def supply_city_from_order_destination(*values: Any) -> str:
+    city = canonical_supply_city(*values)
+    if city in _KNOWN_CITIES:
+        return city
+    return _DEFAULT_DEMAND_CITY
 
 
 def warehouse_priority(name: str, cluster_id: str | None = None) -> tuple[int, str]:

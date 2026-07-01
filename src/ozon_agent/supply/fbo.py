@@ -13,7 +13,12 @@ from typing import Any
 
 from ozon_agent.api.ozon_client import OzonClient
 from ozon_agent.db.connection import execute_query
-from ozon_agent.supply.cities import canonical_supply_city, is_test_entity, warehouse_priority
+from ozon_agent.supply.cities import (
+    canonical_supply_city,
+    is_test_entity,
+    supply_city_from_order_destination,
+    warehouse_priority,
+)
 from ozon_agent.supply.client import SupplyAPIClient
 from ozon_agent.supply.models import Warehouse
 
@@ -287,7 +292,7 @@ def _load_product_sales_from_orders_db(
         if not raw_city:
             continue
 
-        city_name = canonical_supply_city(raw_city)
+        city_name = supply_city_from_order_destination(raw_city)
         if city_name:
             item["city_sales_map"][city_name] += qty
 
@@ -630,7 +635,7 @@ def _normalized_city_sales_map(value: Any) -> dict[str, int]:
 
     result: dict[str, int] = defaultdict(int)
     for raw_city, raw_qty in value.items():
-        city_name = canonical_supply_city(raw_city)
+        city_name = supply_city_from_order_destination(raw_city)
         qty = int(raw_qty or 0)
         if city_name and qty > 0:
             result[city_name] += qty
@@ -668,5 +673,7 @@ def _confidence(days_with_sales: int, total_sales: float, cluster_share: float, 
     share_score = 0.1 if cluster_share > 0 else 0.0
     mode_score = 0.1 if planning_mode == "orders_city_history" else 0.0
     return round(min(0.95, history_score + volume_score + share_score + mode_score), 2)
+
+
 
 
