@@ -67,7 +67,7 @@ def test_supply_callback_show_uses_latest_proposal() -> None:
     proposal.draft_id = None
     with patch("ozon_agent.telegram.callbacks.supply_cb._latest_proposal", return_value=proposal):
         with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_buttons_for_supply", return_value=[("c1", "Москва")]):
-            with patch("ozon_agent.telegram.callbacks.supply_cb._supply_proposals", return_value="Москва — 1 SKU, всего 70 шт"):
+            with patch("ozon_agent.telegram.callbacks.supply_cb._current_fbo_summary", return_value="Москва — 1 SKU, всего 5 шт"):
                 response = route_callback_data("supply.show")
 
     assert response is not None
@@ -96,7 +96,7 @@ def test_supply_callback_payload_preserves_keyboard() -> None:
     proposal.draft_id = None
     with patch("ozon_agent.telegram.callbacks.supply_cb._latest_proposal", return_value=proposal):
         with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_buttons_for_supply", return_value=[("c1", "Москва")]):
-            with patch("ozon_agent.telegram.callbacks.supply_cb._supply_proposals", return_value="Москва — 1 SKU, всего 70 шт"):
+            with patch("ozon_agent.telegram.callbacks.supply_cb._current_fbo_summary", return_value="Москва — 1 SKU, всего 5 шт"):
                 text, reply_markup = route_callback_payload("supply.show")
 
     assert text is not None
@@ -170,12 +170,12 @@ def test_supply_cluster_callback_uses_cluster_summary() -> None:
     with patch("ozon_agent.telegram.callbacks.supply_cb._latest_proposal_for_cluster", return_value=proposal):
         with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_name_from_token", return_value="Москва"):
             with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_buttons_for_supply", return_value=[(token, "Москва"), ("c2", "Казань")]):
-                with patch("ozon_agent.telegram.callbacks.supply_cb._supply_proposals", return_value="Москва — 2 SKU, всего 100 шт"):
+                with patch("ozon_agent.telegram.callbacks.supply_cb._current_fbo_summary", return_value="Москва — 2 SKU, всего 16 шт"):
                     with patch("ozon_agent.telegram.callbacks.supply_cb._render_city_card", return_value="Город: Москва"):
                         response = route_callback_data(f"supply.cluster|{token}")
 
     assert response is not None
-    assert "Москва — 2 SKU, всего 100 шт" in response
+    assert "Москва — 2 SKU, всего 16 шт" in response
     assert "Город: Москва" in response
 
 

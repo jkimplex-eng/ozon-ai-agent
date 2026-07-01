@@ -9,6 +9,7 @@ from ozon_agent.telegram.keyboards.supply_kb import supply_keyboard
 from ozon_agent.telegram.supply_handlers import (
     _cluster_buttons_for_supply,
     _cluster_name_from_token,
+    _current_fbo_summary,
     _latest_proposal,
     _latest_proposal_for_cluster,
     _render_city_card,
@@ -47,7 +48,7 @@ async def _show_supply(query: Any, cluster_name: str | None = None) -> None:
     proposal = _latest_proposal_for_cluster(cluster_name) if cluster_name else _latest_proposal()
     cluster_buttons = _cluster_buttons_for_supply()
     if cluster_name:
-        summary = _supply_proposals(cluster_name)
+        summary = _current_fbo_summary(cluster_name)
         city_card = _render_city_card(cluster_name)
         text = (
             "🚚 Поставки FBO\n\n"
@@ -66,33 +67,19 @@ async def _show_supply(query: Any, cluster_name: str | None = None) -> None:
         )
         return
 
-    if not proposal:
-        text = (
-            "🚚 Поставки FBO\n\n"
-            "Пока нет готовых предложений.\n"
-            "Нажмите 'Пересчитать FBO', чтобы агент собрал новые рекомендации.\n\n"
-            "Таблица: Google Sheets -> FBO Demand"
-        )
-        await query.edit_message_text(
-            text,
-            reply_markup=supply_keyboard(cluster_buttons=cluster_buttons),
-        )
-        return
-
     text = (
         "🚚 Поставки FBO\n\n"
-        f"{_supply_proposals()}\n\n"
-        "Выберите город, чтобы согласовать все SKU, создать поставку и забронировать слот.\n\n"
+        f"{_current_fbo_summary()}\n\n"
+        "Выберите город, чтобы посмотреть актуальный спрос, согласовать SKU, создать поставку и забронировать слот.\n\n"
         "Таблица: Google Sheets -> FBO Demand"
     )
     await query.edit_message_text(
         text,
         reply_markup=supply_keyboard(
-            proposal.proposal_id,
+            proposal.proposal_id if proposal else None,
             cluster_buttons=cluster_buttons,
         ),
     )
-
 
 async def _show_result(query: Any, result: str) -> None:
     proposal = _latest_proposal()

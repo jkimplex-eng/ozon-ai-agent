@@ -126,10 +126,46 @@ def _latest_distinct_proposals(
     )
 
 
+def _current_fbo_plans() -> list[object]:
+    client = create_client()
+    try:
+        engine = FboPlanningEngine(client)
+        return engine.generate_cluster_demand(max_rows=100)
+    except Exception:
+        logger.exception("Failed to build current FBO plans for Telegram")
+        return []
+    finally:
+        client.close()
+
+
+def _current_fbo_city_names() -> list[str]:
+    return sorted({
+        canonical_supply_city(getattr(plan, "cluster_name", ""), getattr(plan, "warehouse_name", ""))
+        for plan in _current_fbo_plans()
+        if int(getattr(plan, "recommended_30", 0) or 0) > 0
+    })
+
+
+def _current_fbo_summary(city_name: str | None = None) -> str:
+    plans = _current_fbo_plans()
+    if city_name:
+        plans = [
+            plan for plan in plans
+            if canonical_supply_city(getattr(plan, "cluster_name", ""), getattr(plan, "warehouse_name", "")) == city_name
+        ]
+        title = f"Что нужно подсортировать: {city_name} (30 дней)"
+    else:
+        title = "Что нужно подсортировать сейчас (30 дней)"
+    return _fbo_cluster_summary(plans, title)
+
+
 def _cluster_names_for_supply() -> list[str]:
-    proposals = list_proposals(limit=200)
-    actionable = _latest_distinct_proposals(proposals, statuses=_ACTIONABLE_STATUSES)
-    return sorted({_proposal_city_name(proposal) for proposal in actionable if _proposal_city_name(proposal)})
+    proposal_names = {
+        _proposal_city_name(proposal)
+        for proposal in _latest_distinct_proposals(list_proposals(limit=200), statuses=_ACTIONABLE_STATUSES)
+        if _proposal_city_name(proposal)
+    }
+    return sorted(proposal_names | set(_current_fbo_city_names()))
 
 
 def _cluster_token(cluster_name: str) -> str:
