@@ -124,7 +124,8 @@ def build_fbo_demand_plans(
         if not sku or total_sales <= 0 or days_with_sales <= 0 or is_test_entity(sku, offer_id, product_name):
             continue
 
-        avg_daily_sales = total_sales / days_with_sales
+        history_days = max(1, int(product.get("history_days") or days_with_sales or 1))
+        avg_daily_sales = total_sales / history_days
         shares, planning_mode, city_sales_map = _resolve_city_shares(product, city_targets, stock_index)
         if not shares:
             continue
@@ -307,6 +308,7 @@ def _load_product_sales_from_orders_db(
                 "name": item["name"],
                 "total_sales": int(item["total_sales"]),
                 "days_with_sales": max(1, len(item["days_with_sales_set"])),
+                "history_days": max(1, lookback_days),
                 "city_sales_map": city_sales_map,
                 "data_sources": list(item["data_sources"]),
                 "planning_mode": item["planning_mode"],
@@ -357,6 +359,7 @@ def _load_product_sales_from_db(
 
     allow_estimated = _allow_estimated_city_share()
     for row in rows:
+        row["history_days"] = max(1, lookback_days)
         row["planning_mode"] = "sales_history_estimated"
         row["allow_estimated_city_share"] = allow_estimated
         if allow_estimated:
@@ -403,6 +406,7 @@ def _load_product_sales_from_files(
                 "name": str(product_info.get("name") or row.get("product_name") or ""),
                 "total_sales": total_sales,
                 "days_with_sales": days_with_sales,
+                "history_days": days_with_sales,
                 "data_sources": ["analytics_data.json"],
                 "planning_mode": "analytics_file_estimated",
                 "allow_estimated_city_share": allow_estimated,
@@ -664,3 +668,5 @@ def _confidence(days_with_sales: int, total_sales: float, cluster_share: float, 
     share_score = 0.1 if cluster_share > 0 else 0.0
     mode_score = 0.1 if planning_mode == "orders_city_history" else 0.0
     return round(min(0.95, history_score + volume_score + share_score + mode_score), 2)
+
+
