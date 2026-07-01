@@ -17,10 +17,17 @@ def supply_keyboard(
     ]
 
     buttons = [(token, name) for token, name in (cluster_buttons or []) if token and name]
+    selected_token = None
+    if selected_cluster:
+        for token, name in buttons:
+            if name == selected_cluster:
+                selected_token = token
+                break
+
     if buttons:
-        rows.append([_btn("Все кластеры", "supply.show")])
+        rows.append([_btn("Все города", "supply.show")])
         cluster_row = []
-        for token, name in buttons[:6]:
+        for token, name in buttons[:8]:
             label = name if name != selected_cluster else f"• {name}"
             cluster_row.append(_btn(label, f"supply.cluster|{token}"))
             if len(cluster_row) == 2:
@@ -29,15 +36,17 @@ def supply_keyboard(
         if cluster_row:
             rows.append(cluster_row)
 
-    if proposal_id:
+    if selected_token:
         rows.append([
-            _btn("✅ Согласовать", f"supply.approve|{proposal_id}"),
-            _btn("📝 Создать поставку", f"supply.create-draft|{proposal_id}"),
+            _btn("✅ Согласовать", f"supply.city-approve|{selected_token}"),
+            _btn("📝 Создать поставку", f"supply.city-create-draft|{selected_token}"),
         ])
         rows.append([
-            _btn("🕒 Показать слоты", f"supply.timeslots|{proposal_id}"),
-            _btn("🚀 Подтвердить первый слот", f"supply.book-first|{proposal_id}"),
+            _btn("🕒 Показать слоты", f"supply.city-timeslots|{selected_token}"),
+            _btn("🚀 Подтвердить первый слот", f"supply.city-book-first|{selected_token}"),
         ])
+    elif proposal_id:
+        rows.append([_btn("ℹ️ Выберите город", "supply.show")])
     else:
         rows.append([_btn("📦 Список предложений", "supply.proposals")])
 

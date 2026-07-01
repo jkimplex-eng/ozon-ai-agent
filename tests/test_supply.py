@@ -290,3 +290,109 @@ class TestDataTruthAuditor:
 
         assert 'draft-1' in result
 
+
+    def test_create_draft_batch_uses_all_selected_items(self):
+        client = MagicMock()
+        manager = ProposalManager(client)
+
+        p1 = SupplyProposal(
+            proposal_id="batch-1",
+            sku=123,
+            offer_id="sku-1",
+            product_name="P1",
+            quantity=10,
+            target_warehouse_id=111,
+            target_warehouse_name="NOVOSIBIRSK_MAIN",
+            target_cluster_id="4067",
+            target_cluster_name="Новосибирск",
+            reason="Test",
+            expected_prevented_loss=1.0,
+            confidence=0.8,
+            data_sources=[],
+            status=ProposalStatus.OWNER_APPROVED,
+        )
+        p2 = SupplyProposal(
+            proposal_id="batch-2",
+            sku=456,
+            offer_id="sku-2",
+            product_name="P2",
+            quantity=20,
+            target_warehouse_id=111,
+            target_warehouse_name="NOVOSIBIRSK_MAIN",
+            target_cluster_id="4067",
+            target_cluster_name="Новосибирск",
+            reason="Test",
+            expected_prevented_loss=1.0,
+            confidence=0.8,
+            data_sources=[],
+            status=ProposalStatus.OWNER_APPROVED,
+        )
+
+        draft_info = MagicMock()
+        draft_info.warehouse_id = 222
+        draft_info.warehouse_name = "Actual Ozon Warehouse"
+
+        with patch('ozon_agent.supply.proposals.get_proposal', side_effect=[p1, p2]):
+            with patch('ozon_agent.supply.proposals.update_proposal_status') as mock_update:
+                with patch.object(manager, '_wait_for_draft_ready', return_value=draft_info):
+                    with patch.object(manager, '_wait_for_supply_order', return_value='supply-1'):
+                        with patch.object(manager._supply_client, 'create_draft', return_value={'draft_id': 'draft-1'}) as mock_create_draft:
+                            with patch.object(manager._supply_client, 'create_supply_from_draft', return_value={}):
+                                result = manager.create_draft_batch(['batch-1', 'batch-2'])
+
+        assert 'items: 2' in result
+        payload = mock_create_draft.call_args.args[0]
+        assert len(payload.items) == 2
+        assert mock_update.call_count == 2
+
+    def test_create_supply_batch_books_one_slot_for_all_selected_items(self):
+        client = MagicMock()
+        manager = ProposalManager(client)
+
+        p1 = SupplyProposal(
+            proposal_id="batch-1",
+            sku=123,
+            offer_id="sku-1",
+            product_name="P1",
+            quantity=10,
+            target_warehouse_id=111,
+            target_warehouse_name="NOVOSIBIRSK_MAIN",
+            target_cluster_id="4067",
+            target_cluster_name="Новосибирск",
+            reason="Test",
+            expected_prevented_loss=1.0,
+            confidence=0.8,
+            data_sources=[],
+            status=ProposalStatus.DRAFT_CREATED,
+            draft_id='draft-1',
+            supply_id='supply-1',
+        )
+        p2 = SupplyProposal(
+            proposal_id="batch-2",
+            sku=456,
+            offer_id="sku-2",
+            product_name="P2",
+            quantity=20,
+            target_warehouse_id=111,
+            target_warehouse_name="NOVOSIBIRSK_MAIN",
+            target_cluster_id="4067",
+            target_cluster_name="Новосибирск",
+            reason="Test",
+            expected_prevented_loss=1.0,
+            confidence=0.8,
+            data_sources=[],
+            status=ProposalStatus.DRAFT_CREATED,
+            draft_id='draft-1',
+            supply_id='supply-1',
+        )
+
+        with patch('ozon_agent.supply.proposals.get_proposal', side_effect=[p1, p2]):
+            with patch('ozon_agent.supply.proposals.update_proposal_status') as mock_update:
+                with patch.object(manager, '_wait_for_timeslot_status'):
+                    with patch.object(manager._supply_client, 'reserve_supply_timeslot', return_value={'operation_id': 'op-1'}) as mock_reserve:
+                        result = manager.create_supply_batch(['batch-1', 'batch-2'], 'slot-1')
+
+        assert 'supply-1' in result
+        mock_reserve.assert_called_once_with(supply_order_id='supply-1', timeslot_id='slot-1')
+        assert mock_update.call_count == 2
+

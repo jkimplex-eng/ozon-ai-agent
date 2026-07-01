@@ -1,4 +1,6 @@
 """Supply Proposal Manager - handles proposal lifecycle."""
+from __future__ import annotations
+
 import logging
 import time
 import uuid
@@ -6,6 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from ozon_agent.api.ozon_client import OzonClient
+from ozon_agent.supply.cities import canonical_supply_city, warehouse_priority
 from ozon_agent.supply.client import SupplyAPIClient
 from ozon_agent.supply.models import DraftPayload, ProposalStatus, SupplyProposal
 from ozon_agent.supply.repository import (
@@ -16,6 +19,12 @@ from ozon_agent.supply.repository import (
 )
 
 logger = logging.getLogger(__name__)
+
+_ACTIONABLE_DUPLICATE_STATUSES = {
+    ProposalStatus.PROPOSED,
+    ProposalStatus.OWNER_APPROVED,
+    ProposalStatus.DRAFT_CREATED,
+}
 
 
 class ProposalManager:
@@ -33,13 +42,14 @@ class ProposalManager:
         proposals = []
 
         for plan in plans:
+            city_name = canonical_supply_city(plan.get("target_cluster_name"), plan.get("target_warehouse_name"))
             existing = self._check_duplicate_proposal(
                 sku=plan["sku"],
-                warehouse_id=plan["target_warehouse_id"],
+                city_name=city_name,
             )
 
             if existing:
-                logger.info(f"Skipping duplicate proposal for SKU {plan['sku']}")
+                logger.info("Skipping duplicate proposal for SKU %s in %s", plan["sku"], city_name)
                 continue
 
             draft_payload = {
@@ -62,7 +72,7 @@ class ProposalManager:
                 target_warehouse_id=plan["target_warehouse_id"],
                 target_warehouse_name=plan["target_warehouse_name"],
                 target_cluster_id=str(plan["target_cluster_id"]),
-                target_cluster_name=plan["target_cluster_name"],
+                target_cluster_name=city_name,
                 reason=plan["reason"],
                 expected_prevented_loss=plan["expected_prevented_loss"],
                 confidence=plan["confidence"],
@@ -74,21 +84,22 @@ class ProposalManager:
             create_proposal(proposal)
             proposals.append(proposal)
 
-            logger.info(f"Created proposal {proposal.proposal_id} for SKU {proposal.sku}")
+            logger.info("Created proposal %s for SKU %s", proposal.proposal_id, proposal.sku)
 
         return proposals
 
     def _check_duplicate_proposal(
         self,
         sku: int,
-        warehouse_id: int,
+        city_name: str,
     ) -> SupplyProposal | None:
-        """Check if proposal already exists for this SKU and warehouse."""
-        existing = list_proposals(status=ProposalStatus.PROPOSED, limit=1000)
+        """Check if actionable proposal already exists for this SKU and city."""
+        existing = list_proposals(limit=1000)
 
-        for p in existing:
-            if p.sku == sku and p.target_warehouse_id == warehouse_id:
-                return p
+        for proposal in existing:
+            proposal_city = canonical_supply_city(proposal.target_cluster_name, proposal.target_warehouse_name)
+            if proposal.sku == sku and proposal_city == city_name and proposal.status in _ACTIONABLE_DUPLICATE_STATUSES:
+                return proposal
 
         return None
 
@@ -111,8 +122,24 @@ class ProposalManager:
             approved_by=approved_by,
         )
 
-        logger.info(f"Proposal {proposal_id} approved by {approved_by}")
+        logger.info("Proposal %s approved by %s", proposal_id, approved_by)
         return f"Proposal {proposal_id} approved by {approved_by}"
+
+    def approve_batch(self, proposal_ids: list[str], approved_by: str) -> str:
+        proposal_ids = list(dict.fromkeys(proposal_ids))
+        approved = 0
+        already_ready = 0
+        for proposal_id in proposal_ids:
+            proposal = get_proposal(proposal_id)
+            if not proposal:
+                continue
+            if proposal.status == ProposalStatus.PROPOSED:
+                self.approve_proposal(proposal_id, approved_by)
+                approved += 1
+            elif proposal.status in (ProposalStatus.OWNER_APPROVED, ProposalStatus.DRAFT_CREATED, ProposalStatus.SUPPLY_CREATED):
+                already_ready += 1
+
+        return f"Approved {approved} proposals; already ready: {already_ready}"
 
     def reject_proposal(self, proposal_id: str, reason: str, rejected_by: str) -> str:
         """Reject proposal."""
@@ -132,27 +159,37 @@ class ProposalManager:
             rejected_reason=reason,
         )
 
-        logger.info(f"Proposal {proposal_id} rejected by {rejected_by}: {reason}")
+        logger.info("Proposal %s rejected by %s: %s", proposal_id, rejected_by, reason)
         return f"Proposal {proposal_id} rejected"
 
     def create_draft(self, proposal_id: str) -> str:
         """Create draft and supply order from approved proposal (MUTATION)."""
         proposal = get_proposal(proposal_id)
-
         if not proposal:
             raise ValueError(f"Proposal not found: {proposal_id}")
+        return self.create_draft_batch([proposal_id])
 
-        retry_failed = proposal.status == ProposalStatus.FAILED and proposal.approved_at is not None
-        if proposal.status != ProposalStatus.OWNER_APPROVED and not retry_failed:
-            raise ValueError(
-                f"Proposal must be approved first. Current status: {proposal.status.value}"
-            )
+    def create_draft_batch(self, proposal_ids: list[str]) -> str:
+        proposals = self._load_batch_proposals(proposal_ids)
+        if not proposals:
+            raise ValueError("No proposals selected for draft creation")
 
-        cluster_id = self._resolve_cluster_id(proposal)
+        for proposal in proposals:
+            retry_failed = proposal.status == ProposalStatus.FAILED and proposal.approved_at is not None
+            if proposal.status != ProposalStatus.OWNER_APPROVED and not retry_failed:
+                raise ValueError(
+                    f"Proposal must be approved first. Current status: {proposal.status.value}"
+                )
+
+        anchor = self._select_batch_anchor(proposals)
+        cluster_id = self._resolve_cluster_id(anchor)
         payload = DraftPayload(
-            warehouse_id=int(proposal.target_warehouse_id),
+            warehouse_id=int(anchor.target_warehouse_id),
             cluster_id=cluster_id,
-            items=[{"sku": int(proposal.sku), "quantity": int(proposal.quantity)}],
+            items=[
+                {"sku": int(proposal.sku), "quantity": int(proposal.quantity)}
+                for proposal in proposals
+            ],
         )
 
         try:
@@ -162,8 +199,8 @@ class ProposalManager:
                 raise RuntimeError(f"No draft_id in response: {draft_response}")
 
             draft_info = self._wait_for_draft_ready(draft_id)
-            actual_warehouse_id = int(draft_info.warehouse_id or proposal.target_warehouse_id)
-            actual_warehouse_name = draft_info.warehouse_name or proposal.target_warehouse_name
+            actual_warehouse_id = int(draft_info.warehouse_id or anchor.target_warehouse_id)
+            actual_warehouse_name = draft_info.warehouse_name or anchor.target_warehouse_name
 
             create_response = self._supply_client.create_supply_from_draft(
                 draft_id=draft_id,
@@ -176,50 +213,62 @@ class ProposalManager:
 
             supply_id = self._wait_for_supply_order(draft_id)
 
-            update_proposal_status(
-                proposal_id=proposal_id,
-                status=ProposalStatus.DRAFT_CREATED,
-                draft_id=draft_id,
-                supply_id=supply_id,
-                draft_payload=payload.to_api_dict(),
-                target_warehouse_id=actual_warehouse_id,
-                target_warehouse_name=actual_warehouse_name,
-            )
+            for proposal in proposals:
+                update_proposal_status(
+                    proposal_id=str(proposal.proposal_id),
+                    status=ProposalStatus.DRAFT_CREATED,
+                    draft_id=draft_id,
+                    supply_id=supply_id,
+                    draft_payload=payload.to_api_dict(),
+                    target_warehouse_id=actual_warehouse_id,
+                    target_warehouse_name=actual_warehouse_name,
+                )
 
             logger.info(
-                "Draft %s and supply order %s created for proposal %s",
+                "Draft %s and supply order %s created for %s proposals",
                 draft_id,
                 supply_id,
-                proposal_id,
+                len(proposals),
             )
-            return f"Draft created: {draft_id}; supply order created: {supply_id}"
+            return f"Draft created: {draft_id}; supply order created: {supply_id}; items: {len(proposals)}"
 
-        except Exception as e:
-            update_proposal_status(
-                proposal_id=proposal_id,
-                status=ProposalStatus.FAILED,
-                error_message=str(e),
-            )
+        except Exception as exc:
+            for proposal in proposals:
+                update_proposal_status(
+                    proposal_id=str(proposal.proposal_id),
+                    status=ProposalStatus.FAILED,
+                    error_message=str(exc),
+                )
             raise
 
     def create_supply(self, proposal_id: str, timeslot_id: str) -> str:
         """Reserve timeslot for already created supply order (MUTATION)."""
         proposal = get_proposal(proposal_id)
-
         if not proposal:
             raise ValueError(f"Proposal not found: {proposal_id}")
+        return self.create_supply_batch([proposal_id], timeslot_id)
 
-        if proposal.status != ProposalStatus.DRAFT_CREATED:
-            raise ValueError(
-                f"Proposal must have draft created. Current status: {proposal.status.value}"
-            )
+    def create_supply_batch(self, proposal_ids: list[str], timeslot_id: str) -> str:
+        proposals = self._load_batch_proposals(proposal_ids)
+        if not proposals:
+            raise ValueError("No proposals selected for slot booking")
 
-        if not proposal.supply_id:
-            raise ValueError("Proposal has no supply_id")
+        for proposal in proposals:
+            if proposal.status != ProposalStatus.DRAFT_CREATED:
+                raise ValueError(
+                    f"Proposal must have draft created. Current status: {proposal.status.value}"
+                )
+            if not proposal.supply_id:
+                raise ValueError("Proposal has no supply_id")
+
+        supply_ids = {str(proposal.supply_id) for proposal in proposals if proposal.supply_id}
+        if len(supply_ids) != 1:
+            raise ValueError(f"Selected proposals belong to multiple supply orders: {sorted(supply_ids)}")
+        supply_id = next(iter(supply_ids))
 
         try:
             response = self._supply_client.reserve_supply_timeslot(
-                supply_order_id=str(proposal.supply_id),
+                supply_order_id=supply_id,
                 timeslot_id=timeslot_id,
             )
             operation_id = str(response.get("operation_id") or response.get("result", {}).get("operation_id") or "")
@@ -228,23 +277,40 @@ class ProposalManager:
 
             self._wait_for_timeslot_status(operation_id)
 
-            update_proposal_status(
-                proposal_id=proposal_id,
-                status=ProposalStatus.SUPPLY_CREATED,
-                supply_id=proposal.supply_id,
-                timeslot_id=timeslot_id,
-            )
+            for proposal in proposals:
+                update_proposal_status(
+                    proposal_id=str(proposal.proposal_id),
+                    status=ProposalStatus.SUPPLY_CREATED,
+                    supply_id=supply_id,
+                    timeslot_id=timeslot_id,
+                )
 
-            logger.info("Supply %s booked for proposal %s", proposal.supply_id, proposal_id)
-            return f"Supply booked: {proposal.supply_id}"
+            logger.info("Supply %s booked for %s proposals", supply_id, len(proposals))
+            return f"Supply booked: {supply_id}"
 
-        except Exception as e:
-            update_proposal_status(
-                proposal_id=proposal_id,
-                status=ProposalStatus.FAILED,
-                error_message=str(e),
-            )
+        except Exception as exc:
+            for proposal in proposals:
+                update_proposal_status(
+                    proposal_id=str(proposal.proposal_id),
+                    status=ProposalStatus.FAILED,
+                    error_message=str(exc),
+                )
             raise
+
+    def _load_batch_proposals(self, proposal_ids: list[str]) -> list[SupplyProposal]:
+        proposals: list[SupplyProposal] = []
+        for proposal_id in dict.fromkeys(proposal_ids):
+            proposal = get_proposal(str(proposal_id))
+            if proposal:
+                proposals.append(proposal)
+        proposals.sort(key=lambda proposal: (proposal.offer_id or str(proposal.sku), proposal.created_at))
+        return proposals
+
+    def _select_batch_anchor(self, proposals: list[SupplyProposal]) -> SupplyProposal:
+        return max(
+            proposals,
+            key=lambda proposal: warehouse_priority(proposal.target_warehouse_name, proposal.target_cluster_id),
+        )
 
     def _resolve_cluster_id(self, proposal: SupplyProposal) -> str:
         try:
@@ -314,7 +380,3 @@ class ProposalManager:
             time.sleep(2)
 
         raise RuntimeError(f"Timeout waiting for timeslot reservation (operation_id: {operation_id})")
-
-
-
-

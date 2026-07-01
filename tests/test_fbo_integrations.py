@@ -68,24 +68,26 @@ def test_supply_callback_show_uses_latest_proposal() -> None:
     with patch("ozon_agent.telegram.callbacks.supply_cb._latest_proposal", return_value=proposal):
         with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_buttons_for_supply", return_value=[("c1", "Москва")]):
             with patch("ozon_agent.telegram.callbacks.supply_cb._supply_proposals", return_value="Москва — 1 SKU, всего 70 шт"):
-                with patch("ozon_agent.telegram.callbacks.supply_cb._render_proposal", return_value="proposal card"):
-                    response = route_callback_data("supply.show")
+                response = route_callback_data("supply.show")
 
     assert response is not None
-    assert "proposal card" in response
+    assert "Выберите город" in response
 
 
 def test_supply_callback_approve_routes_to_button_user() -> None:
     proposal = MagicMock()
     proposal.proposal_id = "p-4"
     proposal.draft_id = None
-    with patch("ozon_agent.telegram.callbacks.supply_cb._supply_approve", return_value="approved from button") as approve:
-        with patch("ozon_agent.telegram.callbacks.supply_cb._latest_proposal", return_value=proposal):
-            with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_buttons_for_supply", return_value=[("c1", "Москва")]):
-                response = route_callback_data("supply.approve|p-4")
+    with patch("ozon_agent.telegram.callbacks.supply_cb._supply_city_approve", return_value="Москва: Approved 2 proposals; already ready: 0") as approve:
+        with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_name_from_token", return_value="Москва"):
+            with patch("ozon_agent.telegram.callbacks.supply_cb._latest_proposal_for_cluster", return_value=proposal):
+                with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_buttons_for_supply", return_value=[("c1", "Москва")]):
+                    with patch("ozon_agent.telegram.callbacks.supply_cb._render_city_card", return_value="Город: Москва"):
+                        response = route_callback_data("supply.city-approve|c1")
 
-    assert response == "approved from button"
-    approve.assert_called_once_with("p-4", "telegram_button")
+    assert response is not None
+    assert "Approved 2 proposals" in response
+    approve.assert_called_once_with("Москва", "telegram_button")
 
 
 def test_supply_callback_payload_preserves_keyboard() -> None:
@@ -95,8 +97,7 @@ def test_supply_callback_payload_preserves_keyboard() -> None:
     with patch("ozon_agent.telegram.callbacks.supply_cb._latest_proposal", return_value=proposal):
         with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_buttons_for_supply", return_value=[("c1", "Москва")]):
             with patch("ozon_agent.telegram.callbacks.supply_cb._supply_proposals", return_value="Москва — 1 SKU, всего 70 шт"):
-                with patch("ozon_agent.telegram.callbacks.supply_cb._render_proposal", return_value="proposal card"):
-                    text, reply_markup = route_callback_payload("supply.show")
+                text, reply_markup = route_callback_payload("supply.show")
 
     assert text is not None
     assert reply_markup is not None
@@ -170,11 +171,12 @@ def test_supply_cluster_callback_uses_cluster_summary() -> None:
         with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_name_from_token", return_value="Москва"):
             with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_buttons_for_supply", return_value=[(token, "Москва"), ("c2", "Казань")]):
                 with patch("ozon_agent.telegram.callbacks.supply_cb._supply_proposals", return_value="Москва — 2 SKU, всего 100 шт"):
-                    with patch("ozon_agent.telegram.callbacks.supply_cb._render_proposal", return_value="proposal card"):
+                    with patch("ozon_agent.telegram.callbacks.supply_cb._render_city_card", return_value="Город: Москва"):
                         response = route_callback_data(f"supply.cluster|{token}")
 
     assert response is not None
     assert "Москва — 2 SKU, всего 100 шт" in response
+    assert "Город: Москва" in response
 
 
 def test_supply_keyboard_callback_data_stays_within_telegram_limit() -> None:

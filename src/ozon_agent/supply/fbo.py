@@ -1,8 +1,9 @@
-"""FBO demand planning by cluster."""
+"""FBO demand planning by city."""
 from __future__ import annotations
 
 import json
 import re
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from math import ceil
@@ -11,6 +12,7 @@ from typing import Any
 
 from ozon_agent.api.ozon_client import OzonClient
 from ozon_agent.db.connection import execute_query
+from ozon_agent.supply.cities import canonical_supply_city, warehouse_priority
 from ozon_agent.supply.client import SupplyAPIClient
 from ozon_agent.supply.models import Warehouse
 
@@ -23,7 +25,7 @@ CURRENT_STOCKS_PATH = DATA_ROOT / "stocks" / "current_stocks.json"
 
 @dataclass(frozen=True)
 class FboDemandPlan:
-    """Demand forecast and replenishment recommendation for one SKU in one cluster."""
+    """Demand forecast and replenishment recommendation for one SKU in one city."""
 
     sku: str
     offer_id: str
@@ -72,7 +74,7 @@ class FboDemandPlan:
 
 
 class FboPlanningEngine:
-    """Calculate FBO demand for 30/60/90 days across available clusters."""
+    """Calculate FBO demand for 30/60/90 days across city groups."""
 
     def __init__(self, client: OzonClient) -> None:
         self._client = client
@@ -102,9 +104,9 @@ def build_fbo_demand_plans(
     warehouses: list[Warehouse],
     max_rows: int = 100,
 ) -> list[FboDemandPlan]:
-    stock_index = _index_stock(stock_rows)
-    cluster_targets = _cluster_targets(warehouses)
-    if not cluster_targets:
+    stock_index = _index_stock_by_city(stock_rows)
+    city_targets = _city_targets(warehouses)
+    if not city_targets:
         return []
 
     plans: list[FboDemandPlan] = []
@@ -116,14 +118,15 @@ def build_fbo_demand_plans(
             continue
 
         avg_daily_sales = total_sales / days_with_sales
-        shares = _cluster_shares(sku, cluster_targets, stock_index)
-        for cluster_id, warehouse in cluster_targets.items():
-            current_stock = stock_index.get((sku, _normalize_warehouse_name(warehouse.name)), 0)
-            share = shares.get(cluster_id, 0.0)
+        shares = _city_shares(sku, city_targets, stock_index)
+        for city_name, warehouse in city_targets.items():
+            current_stock = stock_index.get((sku, city_name), 0)
+            share = shares.get(city_name, 0.0)
             plans.append(
                 _build_one_plan(
                     product=product,
                     warehouse=warehouse,
+                    city_name=city_name,
                     avg_daily_sales=avg_daily_sales,
                     cluster_share=share,
                     current_stock=current_stock,
@@ -138,20 +141,21 @@ def build_fbo_demand_plans(
 def _build_one_plan(
     product: dict[str, Any],
     warehouse: Warehouse,
+    city_name: str,
     avg_daily_sales: float,
     cluster_share: float,
     current_stock: int,
     days_with_sales: int,
     total_sales: float,
 ) -> FboDemandPlan:
-    cluster_daily_sales = avg_daily_sales * cluster_share
-    demand = {horizon: ceil(cluster_daily_sales * horizon) for horizon in DEFAULT_HORIZONS}
+    city_daily_sales = avg_daily_sales * cluster_share
+    demand = {horizon: ceil(city_daily_sales * horizon) for horizon in DEFAULT_HORIZONS}
     recommended = {horizon: max(0, demand[horizon] - current_stock) for horizon in DEFAULT_HORIZONS}
-    stock_days = current_stock / cluster_daily_sales if cluster_daily_sales > 0 else None
+    stock_days = current_stock / city_daily_sales if city_daily_sales > 0 else None
     confidence = _confidence(days_with_sales, total_sales, cluster_share)
     note = str(product.get("data_quality_note") or "") or (
-        "Cluster demand is estimated from SKU sales and warehouse stock distribution; "
-        "database has no direct cluster-level sales table."
+        "City demand is estimated from SKU sales and aggregated city stock; "
+        "Ozon warehouse routing inside the city is selected automatically."
     )
     sources = list(product.get("data_sources") or ["products", "sales", "stocks", "supply_warehouses"])
     if "supply_warehouses" not in sources:
@@ -162,10 +166,10 @@ def _build_one_plan(
         offer_id=str(product.get("offer_id") or ""),
         product_name=str(product.get("name") or product.get("product_name") or ""),
         cluster_id=warehouse.cluster_id or f"warehouse:{warehouse.warehouse_id}",
-        cluster_name=warehouse.cluster_name or warehouse.name,
+        cluster_name=city_name,
         warehouse_id=warehouse.warehouse_id,
         warehouse_name=warehouse.name,
-        avg_daily_sales=round(cluster_daily_sales, 2),
+        avg_daily_sales=round(city_daily_sales, 2),
         cluster_share=round(cluster_share, 4),
         current_stock=current_stock,
         stock_days=round(stock_days, 1) if stock_days is not None else None,
@@ -260,7 +264,7 @@ def _load_product_sales_from_files(
                 "data_sources": ["analytics_data.json"],
                 "data_quality_note": (
                     "Demand is estimated from analytics_data.json period totals; "
-                    "cluster allocation still uses warehouse stock distribution."
+                    "city allocation uses aggregated stock by city."
                 ),
             }
         )
@@ -401,38 +405,43 @@ def _parse_date(value: Any) -> datetime | None:
         return None
 
 
-def _index_stock(stock_rows: list[dict[str, Any]]) -> dict[tuple[str, str], int]:
-    index: dict[tuple[str, str], int] = {}
+def _index_stock_by_city(stock_rows: list[dict[str, Any]]) -> dict[tuple[str, str], int]:
+    index: dict[tuple[str, str], int] = defaultdict(int)
     for row in stock_rows:
         sku = str(row.get("sku") or "")
-        warehouse_name = _normalize_warehouse_name(str(row.get("warehouse_name") or ""))
-        index[(sku, warehouse_name)] = int(row.get("current_stock") or 0)
-    return index
+        city_name = canonical_supply_city(row.get("warehouse_name"))
+        index[(sku, city_name)] += int(row.get("current_stock") or 0)
+    return dict(index)
 
 
-def _cluster_targets(warehouses: list[Warehouse]) -> dict[str, Warehouse]:
+def _city_targets(warehouses: list[Warehouse]) -> dict[str, Warehouse]:
     targets: dict[str, Warehouse] = {}
     for warehouse in warehouses:
-        cluster_id = warehouse.cluster_id or f"warehouse:{warehouse.warehouse_id}"
-        targets.setdefault(cluster_id, warehouse)
+        city_name = canonical_supply_city(warehouse.cluster_name, warehouse.name)
+        current = targets.get(city_name)
+        if current is None:
+            targets[city_name] = warehouse
+            continue
+        if warehouse_priority(warehouse.name, warehouse.cluster_id) > warehouse_priority(current.name, current.cluster_id):
+            targets[city_name] = warehouse
     return targets
 
 
-def _cluster_shares(
+def _city_shares(
     sku: str,
-    cluster_targets: dict[str, Warehouse],
+    city_targets: dict[str, Warehouse],
     stock_index: dict[tuple[str, str], int],
 ) -> dict[str, float]:
     stocks = {
-        cluster_id: stock_index.get((sku, _normalize_warehouse_name(warehouse.name)), 0)
-        for cluster_id, warehouse in cluster_targets.items()
+        city_name: stock_index.get((sku, city_name), 0)
+        for city_name in city_targets
     }
     total_stock = sum(stocks.values())
     if total_stock > 0:
-        return {cluster_id: stock / total_stock for cluster_id, stock in stocks.items()}
+        return {city_name: stock / total_stock for city_name, stock in stocks.items()}
 
-    equal_share = 1 / len(cluster_targets)
-    return {cluster_id: equal_share for cluster_id in cluster_targets}
+    equal_share = 1 / len(city_targets)
+    return {city_name: equal_share for city_name in city_targets}
 
 
 def _normalize_warehouse_name(value: str) -> str:
