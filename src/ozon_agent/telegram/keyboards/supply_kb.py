@@ -8,7 +8,7 @@ from ozon_agent.telegram.keyboards.common import _btn, back_to_menu
 
 def supply_keyboard(
     proposal_id: str | None = None,
-    cluster_names: list[str] | None = None,
+    cluster_buttons: list[tuple[str, str]] | None = None,
     selected_cluster: str | None = None,
 ) -> InlineKeyboardMarkup:
     rows = [
@@ -16,13 +16,13 @@ def supply_keyboard(
          _btn("🧠 Пересчитать FBO", "supply.fbo-propose")],
     ]
 
-    names = [name for name in (cluster_names or []) if name]
-    if names:
+    buttons = [(token, name) for token, name in (cluster_buttons or []) if token and name]
+    if buttons:
         rows.append([_btn("Все кластеры", "supply.show")])
         cluster_row = []
-        for name in names[:6]:
+        for token, name in buttons[:6]:
             label = name if name != selected_cluster else f"• {name}"
-            cluster_row.append(_btn(label, f"supply.cluster|{name}"))
+            cluster_row.append(_btn(label, f"supply.cluster|{token}"))
             if len(cluster_row) == 2:
                 rows.append(cluster_row)
                 cluster_row = []

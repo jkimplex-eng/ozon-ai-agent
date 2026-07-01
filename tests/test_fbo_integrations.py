@@ -7,7 +7,8 @@ from ozon_agent.supply.models import ProposalStatus
 from ozon_agent.telegram.callbacks import supply_cb  # noqa: F401
 from ozon_agent.telegram.callbacks.router import route_callback_data, route_callback_payload
 from ozon_agent.telegram.bot import handle_message
-from ozon_agent.telegram.supply_handlers import _handle_supply, _latest_proposal
+from ozon_agent.telegram.keyboards.supply_kb import supply_keyboard
+from ozon_agent.telegram.supply_handlers import _cluster_token, _handle_supply, _latest_proposal
 
 
 def test_fbo_demand_exporter_registered() -> None:
@@ -65,7 +66,7 @@ def test_supply_callback_show_uses_latest_proposal() -> None:
     proposal.proposal_id = "p-3"
     proposal.draft_id = None
     with patch("ozon_agent.telegram.callbacks.supply_cb._latest_proposal", return_value=proposal):
-        with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_names_for_supply", return_value=["Москва"]):
+        with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_buttons_for_supply", return_value=[("c1", "Москва")]):
             with patch("ozon_agent.telegram.callbacks.supply_cb._supply_proposals", return_value="Москва — 1 SKU, всего 70 шт"):
                 with patch("ozon_agent.telegram.callbacks.supply_cb._render_proposal", return_value="proposal card"):
                     response = route_callback_data("supply.show")
@@ -80,7 +81,7 @@ def test_supply_callback_approve_routes_to_button_user() -> None:
     proposal.draft_id = None
     with patch("ozon_agent.telegram.callbacks.supply_cb._supply_approve", return_value="approved from button") as approve:
         with patch("ozon_agent.telegram.callbacks.supply_cb._latest_proposal", return_value=proposal):
-            with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_names_for_supply", return_value=["Москва"]):
+            with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_buttons_for_supply", return_value=[("c1", "Москва")]):
                 response = route_callback_data("supply.approve|p-4")
 
     assert response == "approved from button"
@@ -92,7 +93,7 @@ def test_supply_callback_payload_preserves_keyboard() -> None:
     proposal.proposal_id = "p-5"
     proposal.draft_id = None
     with patch("ozon_agent.telegram.callbacks.supply_cb._latest_proposal", return_value=proposal):
-        with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_names_for_supply", return_value=["Москва"]):
+        with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_buttons_for_supply", return_value=[("c1", "Москва")]):
             with patch("ozon_agent.telegram.callbacks.supply_cb._supply_proposals", return_value="Москва — 1 SKU, всего 70 шт"):
                 with patch("ozon_agent.telegram.callbacks.supply_cb._render_proposal", return_value="proposal card"):
                     text, reply_markup = route_callback_payload("supply.show")
@@ -164,12 +165,26 @@ def test_supply_cluster_callback_uses_cluster_summary() -> None:
     proposal = MagicMock()
     proposal.proposal_id = "p-cluster"
     proposal.draft_id = None
+    token = _cluster_token("Москва")
     with patch("ozon_agent.telegram.callbacks.supply_cb._latest_proposal_for_cluster", return_value=proposal):
-        with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_names_for_supply", return_value=["Москва", "Казань"]):
-            with patch("ozon_agent.telegram.callbacks.supply_cb._supply_proposals", return_value="Москва — 2 SKU, всего 100 шт"):
-                with patch("ozon_agent.telegram.callbacks.supply_cb._render_proposal", return_value="proposal card"):
-                    response = route_callback_data("supply.cluster|Москва")
+        with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_name_from_token", return_value="Москва"):
+            with patch("ozon_agent.telegram.callbacks.supply_cb._cluster_buttons_for_supply", return_value=[(token, "Москва"), ("c2", "Казань")]):
+                with patch("ozon_agent.telegram.callbacks.supply_cb._supply_proposals", return_value="Москва — 2 SKU, всего 100 шт"):
+                    with patch("ozon_agent.telegram.callbacks.supply_cb._render_proposal", return_value="proposal card"):
+                        response = route_callback_data(f"supply.cluster|{token}")
 
     assert response is not None
     assert "Москва — 2 SKU, всего 100 шт" in response
 
+
+def test_supply_keyboard_callback_data_stays_within_telegram_limit() -> None:
+    markup = supply_keyboard(
+        proposal_id="p-6",
+        cluster_buttons=[(_cluster_token("ЕКАТЕРИНБУРГ_РФЦ_НОВЫЙ_ВОЗВРАТЫ"), "ЕКАТЕРИНБУРГ_РФЦ_НОВЫЙ_ВОЗВРАТЫ")],
+    )
+
+    for row in markup.inline_keyboard:
+        for button in row:
+            callback_data = getattr(button, "callback_data", None)
+            if callback_data:
+                assert len(callback_data.encode("utf-8")) <= 64

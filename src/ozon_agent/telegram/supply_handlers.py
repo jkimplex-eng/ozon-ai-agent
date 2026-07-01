@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import zlib
 from collections import defaultdict
 from typing import Any
 
@@ -87,6 +88,22 @@ def _cluster_names_for_supply() -> list[str]:
         if proposal.status in _ACTIONABLE_STATUSES and proposal.target_cluster_name
     }
     return sorted(names)
+
+
+def _cluster_token(cluster_name: str) -> str:
+    checksum = zlib.crc32(cluster_name.encode("utf-8")) & 0xFFFFFFFF
+    return f"c{checksum:08x}"
+
+
+def _cluster_buttons_for_supply() -> list[tuple[str, str]]:
+    return [(_cluster_token(name), name) for name in _cluster_names_for_supply()]
+
+
+def _cluster_name_from_token(token: str) -> str | None:
+    for name in _cluster_names_for_supply():
+        if _cluster_token(name) == token:
+            return name
+    return None
 
 
 def _fbo_cluster_summary(plans: list[object], title: str) -> str:
