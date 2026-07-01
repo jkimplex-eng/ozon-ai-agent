@@ -41,3 +41,18 @@ def warehouse_priority(name: str, cluster_id: str | None = None) -> tuple[int, s
         if token in lowered:
             score -= 25
     return score, str(name or "")
+
+
+
+def is_test_entity(*values: Any) -> bool:
+    for value in values:
+        lowered = str(value or "").strip().casefold()
+        if not lowered:
+            continue
+        if lowered.startswith("test-sku") or lowered.startswith("test-offer"):
+            return True
+        if lowered.startswith("test_") or lowered.startswith("test-"):
+            return True
+        if lowered.startswith("тест_") or lowered.startswith("тест-"):
+            return True
+    return False

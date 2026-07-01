@@ -6,7 +6,7 @@ from collections import Counter, defaultdict
 from typing import Any
 
 from ozon_agent.api.ozon_client import create_client
-from ozon_agent.supply.cities import canonical_supply_city
+from ozon_agent.supply.cities import canonical_supply_city, is_test_entity
 from ozon_agent.supply.client import SupplyAPIClient
 from ozon_agent.supply.fbo import FboPlanningEngine
 from ozon_agent.supply.models import ProposalStatus, SupplyProposal
@@ -103,7 +103,11 @@ def _latest_distinct_proposals(
     city_name: str | None = None,
     statuses: tuple[ProposalStatus, ...] | None = None,
 ) -> list[SupplyProposal]:
-    filtered = proposals
+    filtered = [
+        proposal
+        for proposal in proposals
+        if not is_test_entity(proposal.offer_id, proposal.product_name, proposal.sku)
+    ]
     if city_name:
         filtered = [proposal for proposal in filtered if _proposal_city_name(proposal) == city_name]
     if statuses:

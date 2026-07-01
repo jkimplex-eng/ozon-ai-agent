@@ -12,7 +12,7 @@ from typing import Any
 
 from ozon_agent.api.ozon_client import OzonClient
 from ozon_agent.db.connection import execute_query
-from ozon_agent.supply.cities import canonical_supply_city, warehouse_priority
+from ozon_agent.supply.cities import canonical_supply_city, is_test_entity, warehouse_priority
 from ozon_agent.supply.client import SupplyAPIClient
 from ozon_agent.supply.models import Warehouse
 
@@ -114,7 +114,9 @@ def build_fbo_demand_plans(
         sku = str(product.get("sku") or "")
         total_sales = float(product.get("total_sales") or 0)
         days_with_sales = int(product.get("days_with_sales") or 0)
-        if not sku or total_sales <= 0 or days_with_sales <= 0:
+        offer_id = str(product.get("offer_id") or "")
+        product_name = str(product.get("name") or product.get("product_name") or "")
+        if not sku or total_sales <= 0 or days_with_sales <= 0 or is_test_entity(sku, offer_id, product_name):
             continue
 
         avg_daily_sales = total_sales / days_with_sales

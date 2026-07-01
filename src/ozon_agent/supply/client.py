@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import date, timedelta
 from typing import Any
 
@@ -23,6 +24,20 @@ class SupplyAPIClient:
 
     def __init__(self, ozon_client: OzonClient) -> None:
         self._client = ozon_client
+
+    def _post_with_retry(self, path: str, payload: dict[str, Any], retries: int = 3, delay_seconds: int = 2) -> dict[str, Any]:
+        last_exc: Exception | None = None
+        for attempt in range(1, retries + 1):
+            try:
+                return self._client._post(path, payload)
+            except RuntimeError as exc:
+                last_exc = exc
+                if "429 Too Many Requests" not in str(exc) or attempt == retries:
+                    raise
+                time.sleep(delay_seconds)
+        if last_exc is not None:
+            raise last_exc
+        return {}
 
     def list_fbo_warehouses(self) -> list[Warehouse]:
         cities = [
@@ -192,7 +207,7 @@ class SupplyAPIClient:
         supply_order_id: str | None = None,
     ) -> list[Timeslot]:
         if supply_order_id:
-            response = self._client._post(
+            response = self._post_with_retry(
                 "/v1/supply-order/timeslot/get",
                 {"supply_order_id": int(supply_order_id)},
             )
@@ -208,7 +223,7 @@ class SupplyAPIClient:
             raise ValueError("cluster_id and warehouse_id are required to read draft timeslots")
 
         today = date.today()
-        response = self._client._post(
+        response = self._post_with_retry(
             "/v2/draft/timeslot/info",
             {
                 "draft_id": int(draft_id),
@@ -272,7 +287,7 @@ class SupplyAPIClient:
         )
 
     def get_supply_timeslot_status(self, operation_id: str) -> dict[str, Any]:
-        return self._client._post(
+        return self._post_with_retry(
             "/v1/supply-order/timeslot/status",
             {"operation_id": operation_id},
         )
