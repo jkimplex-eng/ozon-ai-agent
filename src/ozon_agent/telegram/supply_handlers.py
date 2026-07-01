@@ -392,7 +392,7 @@ def _supply_fbo_propose() -> str:
         engine = FboPlanningEngine(client)
         manager = ProposalManager(client)
         fbo_rows = engine.generate_cluster_demand(max_rows=100)
-        plans = [p for p in (_fbo_plan_to_supply_plan(row) for row in fbo_rows) if p][:30]
+        plans = [p for p in (_fbo_plan_to_supply_plan(row) for row in fbo_rows) if p]
         if not plans:
             return "Нет подтвержденного спроса FBO по городам для создания поставок."
         proposals = manager.create_proposals_from_plans(plans)
